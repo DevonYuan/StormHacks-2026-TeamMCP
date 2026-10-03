@@ -1,0 +1,136 @@
+/**
+ * Main authentication module combining Tailscale identity with session tokens.
+ */
+
+import { GatewayConfig } from '../../shared/config.js'
+import { Identity, AuthResult, TokenClaims } from '../../shared/policy.js'
+import { RevokedTokenRepository } from '../db/repository.js'
+import {
+  resolveIdentityFromIp,
+  getLocalTailnetInfo,
+  isTailscaleAvailable,
+} from './tailscale.js'
+import {
+  initializeSigningKey,
+  getSigningKeyPair,
+  exportPrivateKeyBase64,
+  createSessionToken,
+  verifySessionToken,
+  revokeToken,
+  getPermissionsFromToken,
+  VerifiedToken,
+} from './tokens.js'
+
+export interface AuthContext {
+  identity: Identity
+  token: string
+  claims: TokenClaims
+}
+
+export class AuthManager {
+  private config: GatewayConfig
+  private revokedTokens: RevokedTokenRepository
+  private tailscaleAvailable: boolean = false
+
+  constructor(config: GatewayConfig, revokedTokens: RevokedTokenRepository) {
+    this.config = config
+    this.revokedTokens = revokedTokens
+  }
+
+  async initialize(privateKeyB64?: string): Promise<void> {
+    // Initialize signing key
+    initializeSigningKey(privateKeyB64)
+
+    // Check Tailscale availability
+    this.tailscaleAvailable = await isTailscaleAvailable(this.config)
+    if (!this.tailscaleAvailable) {
+      console.warn('Tailscale CLI not available - falling back to local-only mode')
+    }
+  }
+
+  getSigningKeyInfo(): { kid: string; publicKey: string } | null {
+    const kp = getSigningKeyPair()
+    if (!kp) return null
+    return {
+      kid: kp.kid,
+      publicKey: exportPrivateKeyBase64() || '',
+    }
+  }
+
+  exportPrivateKey(): string | null {
+    return exportPrivateKeyBase64()
+  }
+
+  // Authenticate a connection from a client IP
+  async authenticateConnection(clientIp: string): Promise<AuthResult> {
+    // Try Tailscale identity resolution
+    let identity: Identity | null = null
+
+    if (this.tailscaleAvailable && clientIp.startsWith('100.')) {
+      identity = await resolveIdentityFromIp(clientIp, this.config)
+    }
+
+    // Fallback for local development (loopback)
+    if (!identity && (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp.startsWith('192.168.') || clientIp.startsWith('10.'))) {
+      // Local development identity
+      identity = {
+        user: 'local@dev',
+        device: 'localhost',
+        deviceId: 'local-dev-device',
+        tailnet: 'local',
+      }
+    }
+
+    if (!identity) {
+      return {
+        success: false,
+        error: 'Unable to resolve identity. Ensure Tailscale is running and connected.',
+      }
+    }
+
+    // Create session token with default permissions (will be refined by policy)
+    const permissions: TokenClaims['permissions'] = {
+      servers: [], // Will be filtered by policy
+      tools: [],
+    }
+
+    const token = createSessionToken(identity, permissions, this.config)
+
+    return {
+      success: true,
+      identity,
+      token,
+    }
+  }
+
+  // Verify a session token and return claims
+  verifyToken(token: string): VerifiedToken {
+    return verifySessionToken(token, this.revokedTokens)
+  }
+
+  // Get permissions from token (for policy evaluation)
+  getTokenPermissions(token: string): TokenClaims['permissions'] | null {
+    return getPermissionsFromToken(token, this.revokedTokens)
+  }
+
+  // Revoke a token
+  revokeToken(token: string, reason?: string): void {
+    revokeToken(token, this.revokedTokens, reason)
+  }
+
+  // Get local tailnet info for display in UI
+  async getLocalInfo() {
+    if (!this.tailscaleAvailable) return null
+    return getLocalTailnetInfo(this.config)
+  }
+
+  // Check if Tailscale is available
+  isTailscaleReady(): boolean {
+    return this.tailscaleAvailable
+  }
+}
+
+// Factory function
+export function createAuthManager(config: GatewayConfig, revokedTokens: RevokedTokenRepository): AuthManager {
+  return new AuthManager(config, revokedTokens)
+}
