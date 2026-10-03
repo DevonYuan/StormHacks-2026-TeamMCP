@@ -13,9 +13,8 @@
 3. [Tech Stack](#3-tech-stack)
 4. [Architecture](#4-architecture)
 5. [Development Setup](#5-development-setup)
-6. [Implementation Roadmap](#6-implementation-roadmap)
-7. [Trade-Offs](#7-trade-offs)
-8. [Additional Roadblocks](#8-additional-roadblocks)
+6. [Trade-Offs](#6-trade-offs)
+7. [Additional Roadblocks](#7-additional-roadblocks)
 
 ---
 
@@ -100,7 +99,7 @@ If another teammate wants access, they often need to reproduce the same setup lo
 
 ### Honest counterpoint
 
-This is **not** the right choice when you need 24/7 availability, elastic scale, or access for people who cannot join your private network. If the tool must outlive the host's laptop lid, host it in the cloud. See [Trade-Offs](#7-trade-offs).
+This is **not** the right choice when you need 24/7 availability, elastic scale, or access for people who cannot join your private network. If the tool must outlive the host's laptop lid, host it in the cloud. See [Trade-Offs](#6-trade-offs).
 
 ---
 
@@ -190,7 +189,7 @@ Single Gateway Endpoint
        └── playwright__run_test
 ```
 
-Tool names are namespaced by server ID (`<server>__<tool>`) to prevent collisions, and `tools/list_changed` notifications are forwarded so clients see updates live. This is the harder [Option B](#aggregation-one-endpoint-many-servers) from the design doc, chosen because a single connection is dramatically better UX and is what makes the gateway feel like a *team* MCP environment rather than a fan-out of tunnels.
+Tool names are namespaced by server ID (`<server>__<tool>`) to prevent collisions, and `tools/list_changed` notifications are forwarded so clients see updates live. A single aggregated connection is dramatically better UX and is what makes the gateway feel like a *team* MCP environment rather than a fan-out of tunnels.
 
 ### Security model (non-negotiables)
 
@@ -203,8 +202,6 @@ Tool names are namespaced by server ID (`<server>__<tool>`) to prevent collision
 ---
 
 ## 5. Development Setup
-
-> The Phase 1 scaffold introduces the scripts and files below. This section documents the setup they expect, so machines can be prepared ahead of time.
 
 By design there is **no hosted component to provision** — no cloud account, no managed database, no domain. What follows is the local toolchain plus the small number of third-party accounts the demo genuinely needs.
 
@@ -248,15 +245,15 @@ Then run `npm run rebuild` (wraps `@electron/rebuild`). Skipping this is the mos
 ```text
 .
 ├── src/
-│   ├── main/           Electron main process — supervisor, OS keychain, IPC
+│   ├── main/           Electron main process — supervisor, IPC, gateway supervision
 │   ├── preload/        contextBridge surface exposed to the renderer
 │   ├── renderer/       React dashboard (Vite)
 │   ├── gateway/        Gateway process — its own entry point and bundle
 │   └── shared/         Types + Zod schemas (protocol, policy, config)
+├── config/             Tooling config (electron-vite, Vite, Vitest, Playwright, ESLint, tsconfigs)
 ├── test/
 │   ├── fixtures/       Throwaway MCP servers used by tests
 │   └── e2e/            Playwright + Electron specs
-├── docs/               Design notes (including the original hackathon brief)
 └── .env.example
 ```
 
@@ -391,28 +388,24 @@ Server package names shift over time; verify against the [MCP servers repository
 npx @modelcontextprotocol/inspector
 ```
 
-Point it at the gateway's Streamable HTTP endpoint to exercise `tools/list` and `tools/call` by hand. This is the fastest way to validate the gateway without involving a model at all.
-
-> **Pre-Phase 4:** The aggregated `/mcp` endpoint does not exist yet. Point Inspector at a **per-server endpoint** like `http://localhost:8788/mcp/filesystem` (or `http://<host>.<tailnet>.ts.net:8788/mcp/filesystem` for remote). After Phase 4, use `http://localhost:8788/mcp` for the aggregated endpoint.
+Point Inspector at the gateway's aggregated Streamable HTTP endpoint (`http://localhost:8788/mcp`, or `http://<host>.<tailnet>.ts.net:8788/mcp` for remote) to exercise `tools/list` and `tools/call` by hand. This is the fastest way to validate the gateway without involving a model at all.
 
 **VS Code** — `.vscode/mcp.json`:
 
 ```json
 {
   "servers": {
-    "team-gateway-filesystem": {
+    "team-gateway": {
       "type": "http",
-      "url": "http://localhost:8788/mcp/filesystem"
+      "url": "http://localhost:8788/mcp"
     }
   }
 }
 ```
 
-> **Pre-Phase 4:** Use per-server endpoints (`/mcp/filesystem`, `/mcp/git`, etc.). After Phase 4, use a single entry with `url: "http://localhost:8788/mcp"`.
-
 **Claude Desktop** — add the same endpoint to `claude_desktop_config.json`. Only needed for the AI-driven path; the Inspector covers protocol testing.
 
-The **remote** machine's client points at the host's tailnet address (`http://<host>.<tailnet>.ts.net:8788/mcp/filesystem` pre-Phase 4, `http://<host>.<tailnet>.ts.net:8788/mcp` post-Phase 4) instead of `localhost`.
+The **remote** machine's client points at the host's tailnet address (`http://<host>.<tailnet>.ts.net:8788/mcp`) instead of `localhost`.
 
 ### Tailscale setup (for remote / cross-network testing)
 
@@ -514,73 +507,7 @@ npx playwright install --with-deps  # Linux
 
 ---
 
-## 6. Implementation Roadmap
-
-Time-boxed for a hackathon, ordered so the **riskiest assumption is validated first**.
-
-### Phase 1 — Gateway core (control plane skeleton)
-
-- **Complete the developer setup instructions** — implement everything documented in [Development Setup](#5-development-setup): `.nvmrc`, `.env.example`, the npm scripts, and the native-module `rebuild` step, so a clean machine can go from `git clone` to a running app
-- Electron + React + TypeScript app shell via `electron-vite`
-- Gateway as a supervised child process with start/stop/health over IPC
-- Register existing MCP servers (stdio spawn + Streamable HTTP connect)
-- List registered servers and their discovered tools in the UI
-- SQLite persistence for registry and policy
-- **Exit criteria:** a fresh clone reaches a running app using only the documented setup, and the UI shows real tools from real local MCP servers.
-
-### Phase 2 — Remote access (data plane, per-server routing)
-
-**T00 — First remote call (validates the core concept)**
-> **Milestone:** *Can a remote client invoke a tool from an existing MCP server running on another machine, through the gateway?*
-
-Two physical machines. Host runs the gateway + an existing Filesystem MCP; remote runs a standard MCP client and connects over Tailscale. No custom MCP tool is written.
-
-```text
-Laptop B                    Laptop A
-Remote MCP Client  ──►  Team MCP Gateway  ──►  Filesystem MCP
-    (Tailscale)
-```
-
-If this works, the product concept is proven. If it doesn't, nothing else matters. This is the **first integration checkpoint** of Phase 2 — it requires the listener (WS1), facade (WS2), and static token (WS4) to be functional.
-
-- Expose each server on its own namespaced endpoint (**Option A**, simpler)
-- Streamable HTTP listener bound to loopback + tailnet only
-- Tailscale detection (`tailscale status --json`) and surfaced connection info in the UI
-- End-to-end request forwarding for `tools/call`, `tools/list`, and `notifications`
-- **Exit criteria:** the T00 demo runs through our own gateway, configured from the UI.
-
-### Phase 3 — AuthN / AuthZ
-
-- Identity resolution via Tailscale WhoIs
-- Short-lived Ed25519-signed session tokens stored via `safeStorage`
-- Declarative policy file (Zod-validated) → RBAC at the tool level
-- Reject-on-unknown posture; explicit denied-response paths
-- **Exit criteria:** Alice and Bob get provably different tool sets from the same gateway.
-
-### Phase 4 — Aggregation & UX
-
-- Merge all authorized servers behind one endpoint with `<server>__<tool>` namespacing
-- Conflict detection and `list_changed` propagation
-- Live activity log: `remote user → server → tool` streaming into the dashboard
-- Server health, latency, and last-error surfaced per server
-- **Exit criteria:** one MCP config on the remote laptop reaches every authorized local server.
-
-### Phase 5 — Demo hardening
-
-- Two-machine demo script (host on hackathon Wi-Fi, remote on a phone hotspot, bridged by Tailscale)
-- Failure-mode handling: host offline, server crash, unreachable peer, expired token
-- Packaging with `electron-builder` — **unsigned** installers are sufficient. Signing and notarization are out of scope; see [Keeping every cost at zero](#keeping-every-cost-at-zero).
-- **Exit criteria:** a clean, repeatable demo with a recoverable failure path.
-
-### Post-hackathon backlog
-
-Headscale, existing VPN, and SSH/WireGuard transports · embedded `tsnet` to drop the Tailscale CLI dependency · resources/prompts/sampling/elicitation support · OAuth-authenticated upstream MCP servers · multi-host gateway federation · rate limits and quotas · cross-platform release pipeline.
-
-> **Note on Phase 5:** The post-hackathon backlog includes infrastructure work (update server, notarization, code signing, admin dashboard) — see [Phase 5 README](../docs/mvp/phase5/README.md). This **introduces infrastructure**, which contradicts the "zero infrastructure" value proposition. Phase 5 is only relevant if the project becomes a distributed product requiring automatic updates, notarization, and cross-tailnet federation. For the hackathon, Phase 4 is the endpoint.
-
----
-
-## 7. Trade-Offs
+## 6. Trade-Offs
 
 These are deliberate, and we would rather state them than let them be discovered in the demo.
 
@@ -590,14 +517,14 @@ These are deliberate, and we would rather state them than let them be discovered
 | **Host performance** | All remote requests execute on the host's hardware, competing with the host's own work. | Per-server concurrency caps and timeouts; visible activity log so contention is attributable. |
 | **Networking dependency** | Cross-network access still requires a third-party networking layer (Tailscale) or a shared LAN. | LAN works out of the box for the demo; treat the network as a pluggable transport so Headscale/WireGuard/SSH can slot in later. |
 | **Security surface** | We are intentionally exposing capabilities from someone's machine to other people. A misconfiguration leaks filesystem, database, or browser access. | Narrow binding, per-tool authorization, short-lived tokens, redacted logs, fail-closed defaults. |
-| **Aggregation complexity** | One unified endpoint means merged namespaces, name collisions, and protocol-level translation. Option A would be far simpler. | Namespacing scheme from day one; start with Option A in Phase 2 and layer aggregation in Phase 4. |
+| **Aggregation complexity** | One unified endpoint means merged namespaces, name collisions, and protocol-level translation. | Namespacing scheme from day one; per-server routing first, then layer aggregation behind a single endpoint. |
 | **MCP compatibility** | Different MCP servers use different transports and capability assumptions. This is likely our single largest technical risk. | Support stdio + Streamable HTTP (SSE fallback); capability negotiation rather than hard-coding; treat unsupported features as explicit errors, not silent failures. |
 | **Single point of failure** | The gateway is a chokepoint and a trust chokepoint. If it fails, everything behind it is unreachable. | Keep the data plane a separate, supervised process; crash-isolate and auto-restart. |
 | **No cloud conveniences** | No managed accounts, no centralized policy store, no elastic scale, no vendor SLA. | This is the point: zero infrastructure and full data locality in exchange for these. |
 
 ---
 
-## 8. Additional Roadblocks
+## 7. Additional Roadblocks
 
 Beyond the documented trade-offs, these are the sharp edges we expect to hit.
 
@@ -634,7 +561,7 @@ Beyond the documented trade-offs, these are the sharp edges we expect to hit.
 
 ### Scope
 
-- **Hackathon time is the scarcest resource.** The temptation is to build aggregation, WebAuthn, and an embedded WireGuard stack simultaneously. The roadmap above deliberately sequences the PoC first so that if we run out of time, we ship a working *gateway*, not three half-finished subsystems. Hence, the important of planning. 
+- **Hackathon time is the scarcest resource.** The temptation is to build aggregation, WebAuthn, and an embedded WireGuard stack simultaneously. Sequencing the PoC first means that if we run out of time, we ship a working *gateway*, not three half-finished subsystems. Hence, the importance of planning. 
 
 ---
 
