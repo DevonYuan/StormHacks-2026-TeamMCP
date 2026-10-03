@@ -1,5 +1,6 @@
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
 // This config lives in config/; resolve all project paths from the repo root.
@@ -34,7 +35,7 @@ export default defineConfig({
     build: {
       outDir: path.resolve(root, 'dist/renderer'),
     },
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
         '@': path.resolve(root, 'src/renderer'),
