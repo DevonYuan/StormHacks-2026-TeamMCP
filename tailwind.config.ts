@@ -9,7 +9,7 @@ import type { Config } from "tailwindcss";
  * https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
  *
  * This file only maps those variables to *named* utility classes
- * (e.g. `bg-status-offline`, `text-brand`, `text-h1`). Colours are wired as
+ * (e.g. `bg-status-blocked`, `text-brand`, `text-h1`). Colours are wired as
  * `hsl(var(--token) / <alpha-value>)` so opacity modifiers keep working.
  *
  * TEAM RULE: if a class you need does not exist, add the token in globals.css
@@ -69,11 +69,12 @@ const config: Config = {
         },
         status: {
           online: "hsl(var(--color-status-online) / <alpha-value>)",
-          degraded: "hsl(var(--color-status-degraded) / <alpha-value>)",
           offline: "hsl(var(--color-status-offline) / <alpha-value>)",
-          idle: "hsl(var(--color-status-idle) / <alpha-value>)",
+          blocked: "hsl(var(--color-status-blocked) / <alpha-value>)",
+          degraded: "hsl(var(--color-status-degraded) / <alpha-value>)",
         },
         success: "hsl(var(--color-success) / <alpha-value>)",
+        host: "hsl(var(--color-host) / <alpha-value>)",
         surface: {
           DEFAULT: "hsl(var(--color-surface) / <alpha-value>)",
           sidebar: "hsl(var(--color-surface-sidebar) / <alpha-value>)",
@@ -128,10 +129,38 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)", // 8 · icon tiles
       },
 
+      boxShadow: {
+        host: "0 12px 32px -12px hsl(var(--color-shadow) / 0.5)", // host card in the network tree
+        "card-focus": "0 10px 28px -14px hsl(var(--color-shadow) / 0.35)", // selected device card
+      },
+
       spacing: {
         titlebar: "var(--titlebar-height)",
         header: "var(--header-height)",
+        statusbar: "var(--statusbar-height)",
         sidebar: "var(--sidebar-width)",
+      },
+
+      maxWidth: {
+        content: "var(--content-max-width)",
+      },
+
+      /* App shell: sidebar + main column, main row + status bar. */
+      gridTemplateColumns: {
+        shell: "var(--sidebar-width) 1fr",
+      },
+      gridTemplateRows: {
+        shell: "1fr auto",
+      },
+
+      keyframes: {
+        breathe: {
+          "0%, 100%": { boxShadow: "0 0 0 0 hsl(var(--color-status-online) / 0.35)" },
+          "50%": { boxShadow: "0 0 0 6px hsl(var(--color-status-online) / 0)" },
+        },
+      },
+      animation: {
+        breathe: "breathe 2.8s ease-in-out infinite", // live status dots
       },
     },
   },

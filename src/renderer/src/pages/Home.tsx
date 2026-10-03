@@ -24,15 +24,15 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 const gb = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1)
 
 const dot: Record<DeviceStatus, string> = {
-  online: 'bg-online',
-  offline: 'bg-faint',
-  blocked: 'bg-signal'
+  online: 'bg-status-online',
+  offline: 'bg-status-offline',
+  blocked: 'bg-status-blocked'
 }
 
 const stroke: Record<DeviceStatus, { className: string; dash?: string; width: number }> = {
-  online: { className: 'stroke-online', width: 1.75 },
-  offline: { className: 'stroke-faint', dash: '6 6', width: 1.5 },
-  blocked: { className: 'stroke-signal', dash: '0.5 7', width: 2.25 }
+  online: { className: 'stroke-status-online', width: 1.75 },
+  offline: { className: 'stroke-status-offline', dash: '6 6', width: 1.5 },
+  blocked: { className: 'stroke-status-blocked', dash: '0.5 7', width: 2.25 }
 }
 
 const denied = (d: Device): number =>
@@ -87,11 +87,11 @@ function Spark({
       className={`w-full ${className}`}
       aria-hidden
     >
-      {!idle && <polygon points={`0,40 ${pts} 100,40`} className="fill-online/10" />}
+      {!idle && <polygon points={`0,40 ${pts} 100,40`} className="fill-status-online/10" />}
       <polyline
         points={pts}
         fill="none"
-        className={idle ? 'stroke-faint' : 'stroke-online'}
+        className={idle ? 'stroke-status-offline' : 'stroke-status-online'}
         strokeWidth="1.5"
         strokeDasharray={idle ? '3 3' : undefined}
         strokeLinejoin="round"
@@ -116,13 +116,13 @@ function Stat({
 }): React.JSX.Element {
   return (
     <div className="flex min-w-0 flex-col px-4 py-3">
-      <div className="text-[11px] font-medium tracking-wide text-muted uppercase">{label}</div>
+      <div className="text-label text-ink uppercase">{label}</div>
       <div
-        className={`mt-1 text-xl font-semibold tracking-tight tabular-nums ${tone === 'signal' ? 'text-signal' : ''}`}
+        className={`mt-1 text-h2 tabular-nums ${tone === 'signal' ? 'text-status-blocked' : 'text-ink-heading'}`}
       >
         {value}
       </div>
-      <div className="truncate text-xs text-muted tabular-nums">{sub}</div>
+      <div className="truncate text-body-small text-ink tabular-nums">{sub}</div>
       {children && <div className="mt-2">{children}</div>}
     </div>
   )
@@ -135,7 +135,7 @@ function StatStrip(): React.JSX.Element {
   const memPct = stats ? (stats.memUsed / stats.memTotal) * 100 : 0
 
   return (
-    <div className="mt-5 grid grid-cols-6 divide-x divide-line rounded-xl border border-line bg-card">
+    <div className="glass-card mt-5 grid grid-cols-6 divide-x divide-border rounded-xl">
       <Stat
         label="Host CPU"
         value={stats ? `${stats.cpu.toFixed(1)}%` : '—'}
@@ -148,8 +148,8 @@ function StatStrip(): React.JSX.Element {
         value={stats ? `${gb(stats.memUsed)} GB` : '—'}
         sub={stats ? `of ${gb(stats.memTotal)} GB · ${memPct.toFixed(0)}%` : 'unavailable'}
       >
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line">
-          <div className="h-full rounded-full bg-online" style={{ width: `${memPct}%` }} />
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
+          <div className="h-full rounded-full bg-status-online" style={{ width: `${memPct}%` }} />
         </div>
       </Stat>
       <Stat label="Calls / min" value={String(callsNow)} sub={`${callsToday} today`} />
@@ -211,7 +211,7 @@ function Tree({
               {d.status === 'online' &&
                 !reducedMotion &&
                 [0, dur / 2].map((offset) => (
-                  <circle key={offset} r="3" className="fill-signal">
+                  <circle key={offset} r="3" className="fill-brand-light">
                     {/* Requests travel from the teammate's device into the host. */}
                     <animateMotion
                       path={path}
@@ -234,25 +234,29 @@ function Tree({
             </g>
           )
         })}
-        <circle cx={PORT_L} cy={yHost} r="3.5" className="fill-ink" />
+        <circle cx={PORT_L} cy={yHost} r="3.5" className="fill-host" />
       </svg>
 
       <div
-        className="absolute -translate-y-1/2 rounded-xl bg-ink px-4 py-3 text-white shadow-[0_12px_32px_-12px_rgb(17_17_17/0.5)]"
+        className="absolute -translate-y-1/2 rounded-xl bg-host px-4 py-3 text-primary-foreground shadow-host"
         style={{ left: pctX(HOST_X), top: pctY(yHost), width: pctX(HOST_W) }}
       >
-        <div className="truncate text-[15px] font-semibold">{host.name}</div>
-        <div className="mt-0.5 font-mono text-[11px] text-white/60">host · {host.ip}</div>
-        <div className="mt-2.5 flex items-center gap-1.5 text-xs text-white/50">
-          <span className="size-1.5 rounded-full bg-signal" />
+        <div className="truncate text-h3">{host.name}</div>
+        <div className="mt-0.5 font-mono text-caption text-primary-foreground/60">
+          host · {host.ip}
+        </div>
+        <div className="mt-2.5 flex items-center gap-1.5 text-body-small text-primary-foreground/50">
+          <span className="size-1.5 rounded-full bg-brand-secondary" />
           {host.sharedServers} servers shared
         </div>
       </div>
 
       {label && (
         <span
-          className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border bg-card px-2 py-0.5 text-[11px] font-medium tabular-nums ${
-            focus.status === 'blocked' ? 'border-signal/30 text-signal' : 'border-line text-online'
+          className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border bg-card px-2 py-0.5 text-caption font-medium tabular-nums ${
+            focus.status === 'blocked'
+              ? 'border-status-blocked/30 text-status-blocked'
+              : 'border-border text-status-online'
           }`}
           style={{ left: pctX(PORT_L + BEND), top: pctY(fy) }}
         >
@@ -263,29 +267,31 @@ function Tree({
       {devices.map((d, i) => {
         const focused = d === focus
         const ring =
-          d.status === 'blocked' ? 'border-signal ring-signal' : 'border-online ring-online'
+          d.status === 'blocked'
+            ? 'border-status-blocked ring-status-blocked'
+            : 'border-status-online ring-status-online'
         return (
           <button
             key={d.id}
             onClick={() => onFocus(d)}
             aria-pressed={focused}
-            className={`absolute -translate-y-1/2 rounded-xl border bg-card px-3.5 py-2.5 text-left transition duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal ${
+            className={`absolute -translate-y-1/2 rounded-xl border bg-card px-3.5 py-2.5 text-left transition duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
               focused
-                ? `${ring} ring-1 shadow-[0_10px_28px_-14px_rgb(17_17_17/0.35)]`
-                : 'border-line opacity-55 hover:opacity-100'
+                ? `${ring} shadow-card-focus ring-1`
+                : 'border-border opacity-55 hover:opacity-100'
             } ${d.status === 'blocked' && !focused ? 'border-dashed' : ''}`}
             style={{ left: pctX(DEV_X), top: pctY(yDevice(i)), width: pctX(DEV_W) }}
           >
             <div className="flex items-center gap-2">
               <span className={`size-2 shrink-0 rounded-full ${dot[d.status]}`} />
-              <span className="truncate text-sm font-medium">{d.name}</span>
+              <span className="truncate text-body font-medium">{d.name}</span>
               <span
-                className={`ml-auto shrink-0 text-[11px] tabular-nums ${d.status === 'blocked' ? 'text-signal' : 'text-muted'}`}
+                className={`ml-auto shrink-0 text-caption tabular-nums ${d.status === 'blocked' ? 'text-status-blocked' : 'text-ink'}`}
               >
                 {d.status === 'online' ? `${rate(d)}/min` : d.status}
               </span>
             </div>
-            <div className="mt-0.5 truncate pl-4 font-mono text-[11px] text-muted">
+            <div className="mt-0.5 truncate pl-4 font-mono text-caption text-ink">
               {d.user} · {d.ip}
             </div>
           </button>
@@ -302,7 +308,7 @@ function Legend(): React.JSX.Element {
     ['Blocked attempt', 'blocked']
   ]
   return (
-    <ul className="flex gap-5 text-xs text-muted">
+    <ul className="flex gap-5 text-body-small text-ink">
       {items.map(([text, status]) => (
         <li key={status} className="flex items-center gap-1.5">
           <svg width="22" height="6" aria-hidden>
@@ -325,9 +331,9 @@ function Legend(): React.JSX.Element {
 }
 
 const pill: Record<DeviceStatus, string> = {
-  online: 'bg-online/10 text-online',
-  offline: 'bg-black/[0.05] text-muted',
-  blocked: 'bg-signal/12 text-signal'
+  online: 'bg-status-online/10 text-status-online',
+  offline: 'bg-surface-muted text-ink',
+  blocked: 'bg-status-blocked/12 text-status-blocked'
 }
 
 function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
@@ -339,27 +345,27 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
     ['Denied', String(denied(d))]
   ]
   return (
-    <section className="flex h-full flex-col rounded-xl border border-line bg-card p-5">
+    <section className="glass-card flex h-full flex-col rounded-xl p-5">
       <div className="flex items-center gap-2">
         <span className={`size-2 rounded-full ${dot[d.status]}`} />
-        <h2 className="truncate font-semibold">{d.name}</h2>
+        <h2 className="truncate text-h3 text-ink-heading">{d.name}</h2>
         <span
-          className={`ml-auto rounded-md px-2 py-0.5 text-[11px] font-medium capitalize ${pill[d.status]}`}
+          className={`ml-auto rounded-md px-2 py-0.5 text-caption font-medium capitalize ${pill[d.status]}`}
         >
           {d.status}
         </span>
       </div>
-      <div className="mt-1 font-mono text-[11px] text-muted">
+      <div className="mt-1 font-mono text-caption text-ink">
         {d.user} · {d.ip}
       </div>
-      <p className="mt-2 text-sm text-muted">{statusLine(d)}</p>
+      <p className="mt-2 text-body text-ink">{statusLine(d)}</p>
 
-      <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line">
+      <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
         {cells.map(([k, v]) => (
           <div key={k} className="bg-card px-3 py-2">
-            <dt className="text-[11px] text-muted">{k}</dt>
+            <dt className="text-caption text-ink">{k}</dt>
             <dd
-              className={`text-lg font-semibold tabular-nums ${k === 'Denied' && v !== '0' ? 'text-signal' : ''}`}
+              className={`text-h2 tabular-nums ${k === 'Denied' && v !== '0' ? 'text-status-blocked' : 'text-ink-heading'}`}
             >
               {v}
             </dd>
@@ -367,13 +373,13 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
         ))}
       </dl>
 
-      <div className="mt-4 flex items-baseline justify-between text-[11px] text-muted">
+      <div className="mt-4 flex items-baseline justify-between text-caption text-ink">
         <span>Traffic</span>
         <span>last 30 min</span>
       </div>
       <Spark values={d.traffic} className="mt-1 h-12" />
 
-      <dl className="mt-4 space-y-2 border-t border-line pt-4 text-sm">
+      <dl className="mt-4 space-y-2 border-t border-border pt-4 text-body">
         {(
           [
             ['Client', d.client],
@@ -382,24 +388,24 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
           ] as const
         ).map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4">
-            <dt className="text-muted">{k}</dt>
+            <dt className="text-ink">{k}</dt>
             <dd className="truncate tabular-nums">{v}</dd>
           </div>
         ))}
         <div className="flex justify-between gap-4">
-          <dt className="text-muted">Access</dt>
+          <dt className="text-ink">Access</dt>
           <dd className="flex flex-wrap justify-end gap-1">
             {d.servers.length ? (
               d.servers.map((s) => (
                 <span
                   key={s}
-                  className="rounded border border-line px-1.5 font-mono text-[11px] text-ink"
+                  className="rounded border border-border px-1.5 font-mono text-caption text-ink-emphasis"
                 >
                   {s}
                 </span>
               ))
             ) : (
-              <span className="text-signal">not in policy</span>
+              <span className="text-status-blocked">not in policy</span>
             )}
           </dd>
         </div>
@@ -411,38 +417,38 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
 function Servers(): React.JSX.Element {
   const running = servers.filter((s) => s.running).length
   return (
-    <section className="rounded-xl border border-line bg-card">
+    <section className="glass-card rounded-xl">
       <div className="flex items-baseline justify-between px-5 pt-4">
-        <h2 className="font-semibold">Shared servers</h2>
-        <span className="text-xs text-muted">
+        <h2 className="text-h3 text-ink-heading">Shared servers</h2>
+        <span className="text-body-small text-ink">
           {running} of {servers.length} running
         </span>
       </div>
-      <table className="mt-2 w-full table-fixed text-sm">
+      <table className="mt-2 w-full table-fixed text-body">
         <thead>
-          <tr className="text-left text-[11px] tracking-wide text-muted uppercase">
-            <th className="px-5 py-2 font-medium">Server</th>
-            <th className="w-14 px-3 py-2 text-right font-medium">Tools</th>
-            <th className="w-20 px-3 py-2 text-right font-medium">Calls/min</th>
-            <th className="w-16 px-3 py-2 text-right font-medium">CPU</th>
-            <th className="w-20 px-5 py-2 text-right font-medium">Memory</th>
+          <tr className="text-left text-h5 text-ink uppercase">
+            <th className="px-5 py-2">Server</th>
+            <th className="w-14 px-3 py-2 text-right">Tools</th>
+            <th className="w-20 px-3 py-2 text-right">Calls/min</th>
+            <th className="w-16 px-3 py-2 text-right">CPU</th>
+            <th className="w-20 px-5 py-2 text-right">Memory</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-line border-t border-line">
+        <tbody className="divide-y divide-border border-t border-border">
           {servers.map((s) => (
-            <tr key={s.id} className={s.running ? '' : 'text-muted'}>
+            <tr key={s.id} className={s.running ? '' : 'text-ink'}>
               <td className="px-5 py-2.5">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-online' : 'bg-faint'}`}
+                    className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-status-online' : 'bg-status-offline'}`}
                   />
-                  <span className="font-mono text-[13px] font-medium">{s.id}</span>
-                  <span className="text-[11px] text-faint">
+                  <span className="font-mono text-body font-medium">{s.id}</span>
+                  <span className="text-caption text-ink-muted">
                     {s.running ? s.transport : 'stopped'}
                   </span>
                 </div>
                 <div
-                  className="mt-0.5 truncate pl-3.5 font-mono text-[11px] text-faint"
+                  className="mt-0.5 truncate pl-3.5 font-mono text-caption text-ink-muted"
                   title={s.command}
                 >
                   {s.command}
@@ -468,29 +474,29 @@ function Servers(): React.JSX.Element {
 
 function Activity({ focus }: { focus: Device }): React.JSX.Element {
   return (
-    <section className="rounded-xl border border-line bg-card">
+    <section className="glass-card rounded-xl">
       <div className="flex items-baseline justify-between px-5 pt-4">
-        <h2 className="font-semibold">Activity</h2>
-        <span className="text-xs text-muted">all devices</span>
+        <h2 className="text-h3 text-ink-heading">Activity</h2>
+        <span className="text-body-small text-ink">all devices</span>
       </div>
-      <ul className="mt-2 divide-y divide-line border-t border-line">
+      <ul className="mt-2 divide-y divide-border border-t border-border">
         {activity.slice(0, 8).map((e) => {
           const [server, tool] = e.tool.split('__')
           const mine = e.deviceId === focus.id
           return (
-            <li key={e.id} className="flex items-center gap-3 px-5 py-2 text-[13px]">
-              <span className="w-14 shrink-0 text-muted tabular-nums">{e.at}</span>
-              <span className={`w-14 shrink-0 truncate ${mine ? 'font-medium' : 'text-muted'}`}>
+            <li key={e.id} className="flex items-center gap-3 px-5 py-2 text-body-small">
+              <span className="w-14 shrink-0 text-ink tabular-nums">{e.at}</span>
+              <span className={`w-14 shrink-0 truncate ${mine ? 'font-medium' : 'text-ink'}`}>
                 {e.deviceId}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs" title={e.tool}>
-                <span className="text-muted">{server}__</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-code" title={e.tool}>
+                <span className="text-ink">{server}__</span>
                 {tool}
               </span>
               {e.outcome === 'allowed' ? (
-                <span className="shrink-0 text-xs text-muted tabular-nums">{e.ms} ms</span>
+                <span className="shrink-0 text-body-small text-ink tabular-nums">{e.ms} ms</span>
               ) : (
-                <span className="shrink-0 rounded-md bg-signal/10 px-1.5 py-0.5 text-[11px] font-medium text-signal">
+                <span className="shrink-0 rounded-md bg-status-blocked/10 px-1.5 py-0.5 text-caption font-medium text-status-blocked">
                   denied
                 </span>
               )}
@@ -512,14 +518,14 @@ export default function Home(): React.JSX.Element {
     <>
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Who&apos;s connected</h1>
-          <p className="mt-1 text-sm text-muted">
+          <h1 className="text-h1 text-ink-heading">Who&apos;s connected</h1>
+          <p className="mt-1 text-body text-ink">
             Your laptop at the root, each teammate&apos;s device as a branch. Select one to inspect
             it.
           </p>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted">
-          <span className="size-1.5 rounded-full bg-online motion-safe:animate-breathe" />
+        <div className="flex items-center gap-1.5 text-body-small text-ink">
+          <span className="size-1.5 rounded-full bg-status-online motion-safe:animate-breathe" />
           Live · updates every 2s
         </div>
       </div>
@@ -527,18 +533,12 @@ export default function Home(): React.JSX.Element {
       <StatStrip />
 
       <div className="mt-4 grid grid-cols-12 gap-4">
-        <div className="col-span-8 flex flex-col overflow-hidden rounded-xl border border-line bg-card">
-          <div
-            className="flex flex-1 items-center"
-            style={{
-              backgroundImage: 'radial-gradient(var(--color-line) 1px, transparent 1px)',
-              backgroundSize: '20px 20px'
-            }}
-          >
+        <div className="glass-card col-span-8 flex flex-col overflow-hidden rounded-xl">
+          <div className="dot-grid flex flex-1 items-center">
             <Tree focus={focus} onFocus={setFocus} />
           </div>
-          <div className="flex items-center justify-between border-t border-line px-4 py-2.5">
-            <span className="text-xs text-muted">
+          <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
+            <span className="text-body-small text-ink">
               {devices.length} devices · {online} online
             </span>
             <Legend />

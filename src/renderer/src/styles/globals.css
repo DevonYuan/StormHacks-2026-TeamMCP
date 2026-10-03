@@ -1,12 +1,18 @@
 @import "tailwindcss";
 @config "../../../../tailwind.config.ts";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * ============================================================================
  * Design tokens — single source of truth
  * ----------------------------------------------------------------------------
- * Source: Variant "CORE.OS Fleet Manager" (dark theme)
- * https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
+ * Two themes, toggled by the `dark` class on <html>:
+ *   - Light (default): the original Team MCP warm-neutral palette.
+ *   - Dark: Variant "CORE.OS Fleet Manager"
+ *     https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
+ * Components only reference semantic tokens (section 2), so they restyle
+ * automatically when the theme changes.
  *
  * Every colour is stored as HSL *channels* ("H S% L%") — no hsl() wrapper and
  * no hex — so they can be consumed as hsl(var(--token)) and still support
@@ -17,11 +23,24 @@
  * ============================================================================
  */
 :root {
+  color-scheme: light;
+
   /* ------------------------------------------------------------------------
    * 1. Raw palette — design colour name -> HSL of the source hex.
    *    These are the only place the literal design values live.
    * ---------------------------------------------------------------------- */
-  /* Brand colours */
+  /* Light theme */
+  --mcp-warm-50: 45 20% 96%; /* #F7F6F3 */
+  --mcp-warm-100: 43 18% 92%; /* #EFEDE8 */
+  --mcp-warm-150: 45 9% 91%; /* #EBEAE7 — black/5% over warm-50 */
+  --mcp-warm-200: 43 13% 89%; /* #E7E5E0 */
+  --mcp-warm-400: 45 5% 71%; /* #B9B7B1 */
+  --mcp-warm-600: 48 2% 41%; /* #6B6A66 */
+  --mcp-ink: 0 0% 7%; /* #111111 */
+  --mcp-denim: 225 26% 33%; /* #3F4A6B */
+  --mcp-orange: 19 80% 54%; /* #E8692C */
+
+  /* Dark theme — brand colours */
   --mcp-indigo-100: 226 100% 94%; /* #E0E7FF */
   --mcp-indigo-400: 234 89% 74%; /* #818CF8 */
   --mcp-indigo-500: 239 84% 67%; /* #6366F1 */
@@ -29,7 +48,7 @@
   --mcp-indigo-950: 244 47% 20%; /* #1E1B4B */
   --mcp-cyan-400: 188 86% 53%; /* #22D3EE */
 
-  /* Neutral colours */
+  /* Dark theme — neutral colours */
   --mcp-white: 0 0% 100%; /* #FFFFFF */
   --mcp-slate-200: 214 32% 91%; /* #E2E8F0 */
   --mcp-slate-400: 215 20% 65%; /* #94A3B8 */
@@ -41,42 +60,54 @@
   --mcp-navy: 222 49% 7%; /* #090E1A */
   --mcp-gray-950: 224 71% 4%; /* #030712 */
 
-  /* Semantic colours */
+  /* Shared semantic colours */
   --mcp-emerald-400: 158 64% 52%; /* #34D399 */
   --mcp-amber-400: 43 96% 56%; /* #FBBF24 */
   --mcp-rose-500: 350 89% 60%; /* #F43F5E */
 
   /* ------------------------------------------------------------------------
-   * 2. Semantic tokens — what the app/components actually reference.
-   *    Each points at a raw palette value above.
+   * 2. Semantic tokens (light theme) — what the app/components reference.
+   *    Each points at a raw palette value above; `.dark` below overrides them.
    * ---------------------------------------------------------------------- */
-  --color-brand: var(--mcp-indigo-600); /* primary buttons, logo tile */
-  --color-brand-hover: var(--mcp-indigo-500); /* hover, active nav bar, progress */
-  --color-brand-text: var(--mcp-indigo-400); /* eyebrows, badges, links on dark */
-  --color-brand-light: var(--mcp-indigo-100); /* active nav text */
-  --color-brand-subtle: var(--mcp-indigo-950); /* tinted panels (plan card) */
-  --color-brand-secondary: var(--mcp-cyan-400); /* gradient partner, IPs */
+  --color-brand: var(--mcp-orange); /* primary buttons, logo tile */
+  --color-brand-hover: var(--mcp-orange); /* hover, focus ring */
+  --color-brand-text: var(--mcp-orange); /* active nav icon, accent text */
+  --color-brand-light: var(--mcp-orange); /* request pulses in the tree */
+  --color-brand-subtle: var(--mcp-warm-100); /* tinted panels */
+  --color-brand-secondary: var(--mcp-orange); /* host card status dot */
+  --color-host: var(--mcp-ink); /* host card in the network tree */
+  --color-shadow: var(--mcp-ink); /* tint for elevated shadows */
 
-  /* Gateway / MCP server health */
-  --color-status-online: var(--mcp-cyan-400);
+  /* Device / MCP server state — names match DeviceStatus in @shared/types */
+  --color-status-online: var(--mcp-denim);
+  --color-status-offline: var(--mcp-warm-400); /* also stopped servers, idle sparklines */
+  --color-status-blocked: var(--mcp-orange); /* blocked devices, denied calls */
   --color-status-degraded: var(--mcp-amber-400);
-  --color-status-offline: var(--mcp-rose-500);
-  --color-status-idle: var(--mcp-slate-700);
   --color-success: var(--mcp-emerald-400); /* positive trends (+4%) */
 
-  --color-surface: var(--mcp-gray-950); /* app background, header */
-  --color-surface-sidebar: var(--mcp-navy);
-  --color-surface-raised: var(--mcp-slate-900); /* cards, inputs, secondary buttons */
-  --color-surface-muted: var(--mcp-slate-800); /* hover rows, icon tiles */
+  --color-surface: var(--mcp-warm-50); /* app background, status bar */
+  --color-surface-sidebar: var(--mcp-warm-100);
+  --color-surface-raised: var(--mcp-white); /* cards */
+  --color-surface-muted: var(--mcp-warm-150); /* hover, neutral badges */
 
-  --color-border: var(--mcp-slate-800);
-  --color-border-strong: var(--mcp-slate-700);
+  --color-border: var(--mcp-warm-200);
+  --color-border-strong: var(--mcp-warm-400);
 
-  --color-ink-heading: var(--mcp-white); /* page titles, stat values */
-  --color-ink-emphasis: var(--mcp-slate-200); /* button + input text */
-  --color-ink: var(--mcp-slate-400); /* body text */
-  --color-ink-muted: var(--mcp-slate-500); /* labels, secondary text */
-  --color-ink-subtle: var(--mcp-slate-600); /* section headers, disabled */
+  --color-ink-heading: var(--mcp-ink); /* page titles, stat values */
+  --color-ink-emphasis: var(--mcp-ink); /* primary text */
+  --color-ink: var(--mcp-warm-600); /* secondary text */
+  --color-ink-muted: var(--mcp-warm-400); /* hints, section headers */
+  --color-ink-subtle: var(--mcp-warm-400); /* disabled */
+
+  /* Theme-dependent treatment for the glass-card and sidebar-active utilities. */
+  --glass-alpha: 1;
+  --glass-border-alpha: 1;
+  --nav-active-bg: var(--color-surface-raised);
+  --nav-active-bg-alpha: 1;
+  --nav-active-bg-alpha-end: 1;
+  --nav-active-fg: var(--color-ink-emphasis);
+  --nav-active-bar-alpha: 0;
+  --nav-active-shadow: 0 1px 2px hsl(var(--color-shadow) / 0.05);
 
   /* ------------------------------------------------------------------------
    * 3. Typography — family stacks consumed by tailwind.config.ts.
@@ -93,7 +124,9 @@
   --radius: 0.75rem; /* 12px — buttons, inputs; cards use radius + 4px */
   --titlebar-height: 2.5rem;
   --header-height: 4rem; /* 64px */
+  --statusbar-height: 2rem; /* 32px */
   --sidebar-width: 16rem; /* 256px */
+  --content-max-width: 90rem; /* 1440px */
 
   /* ------------------------------------------------------------------------
    * 5. shadcn/ui contract — every value points at a token above, so any
@@ -121,12 +154,58 @@
   --accent: var(--color-surface-muted);
   --accent-foreground: var(--color-ink-heading);
 
-  --destructive: var(--color-status-offline);
+  --destructive: var(--color-status-blocked);
   --destructive-foreground: var(--mcp-white);
 
   --border: var(--color-border);
   --input: var(--color-border);
   --ring: var(--color-brand-hover);
+}
+
+/*
+ * Dark theme — Variant "CORE.OS Fleet Manager". Only semantic tokens change;
+ * the shadcn contract above follows automatically.
+ */
+.dark {
+  color-scheme: dark;
+
+  --color-brand: var(--mcp-indigo-600); /* primary buttons, logo tile */
+  --color-brand-hover: var(--mcp-indigo-500); /* hover, active nav bar, progress */
+  --color-brand-text: var(--mcp-indigo-400); /* eyebrows, badges, links on dark */
+  --color-brand-light: var(--mcp-indigo-100); /* active nav text, request pulses */
+  --color-brand-subtle: var(--mcp-indigo-950); /* tinted panels (plan card) */
+  --color-brand-secondary: var(--mcp-cyan-400); /* gradient partner, IPs */
+  --color-host: var(--mcp-indigo-600);
+  --color-shadow: var(--mcp-indigo-600);
+
+  --color-status-online: var(--mcp-cyan-400);
+  --color-status-offline: var(--mcp-slate-700);
+  --color-status-blocked: var(--mcp-rose-500);
+  --color-status-degraded: var(--mcp-amber-400);
+  --color-success: var(--mcp-emerald-400);
+
+  --color-surface: var(--mcp-gray-950);
+  --color-surface-sidebar: var(--mcp-navy);
+  --color-surface-raised: var(--mcp-slate-900);
+  --color-surface-muted: var(--mcp-slate-800);
+
+  --color-border: var(--mcp-slate-800);
+  --color-border-strong: var(--mcp-slate-700);
+
+  --color-ink-heading: var(--mcp-white);
+  --color-ink-emphasis: var(--mcp-slate-200);
+  --color-ink: var(--mcp-slate-400);
+  --color-ink-muted: var(--mcp-slate-500);
+  --color-ink-subtle: var(--mcp-slate-600);
+
+  --glass-alpha: 0.6;
+  --glass-border-alpha: 0.5;
+  --nav-active-bg: var(--color-brand-hover);
+  --nav-active-bg-alpha: 0.15;
+  --nav-active-bg-alpha-end: 0;
+  --nav-active-fg: var(--color-brand-light);
+  --nav-active-bar-alpha: 1;
+  --nav-active-shadow: none;
 }
 
 /*
@@ -149,7 +228,7 @@
 
   body {
     background-color: hsl(var(--background));
-    color: hsl(var(--color-ink));
+    color: hsl(var(--foreground));
     font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
     /* Native apps don't let users select UI chrome; opt back in with `select-text`. */
@@ -196,27 +275,34 @@
  * ============================================================================
  */
 
-/* Translucent card: stat tiles, tables. Pair with `rounded-xl` (16px). */
+/* Card surface: solid in light, translucent glass in dark. Pair with `rounded-xl` (16px). */
 @utility glass-card {
-  background: hsl(var(--color-surface-raised) / 0.6);
+  background: hsl(var(--color-surface-raised) / var(--glass-alpha));
   backdrop-filter: blur(8px);
-  border: 1px solid hsl(var(--color-border) / 0.5);
+  border: 1px solid hsl(var(--color-border) / var(--glass-border-alpha));
 }
 
-/* Selected sidebar nav item. */
+/* Selected sidebar nav item: raised card in light, indigo fade + bar in dark. */
 @utility sidebar-active {
   background: linear-gradient(
     90deg,
-    hsl(var(--color-brand-hover) / 0.15) 0%,
-    hsl(var(--color-brand-hover) / 0) 100%
+    hsl(var(--nav-active-bg) / var(--nav-active-bg-alpha)) 0%,
+    hsl(var(--nav-active-bg) / var(--nav-active-bg-alpha-end)) 100%
   );
-  color: hsl(var(--color-brand-light));
-  border-left: 3px solid hsl(var(--color-brand-hover));
+  color: hsl(var(--nav-active-fg));
+  border-left: 3px solid hsl(var(--color-brand-hover) / var(--nav-active-bar-alpha));
+  box-shadow: var(--nav-active-shadow);
 }
 
 /* Halo around an online status dot. */
 @utility status-glow-online {
   box-shadow: 0 0 10px hsl(var(--color-status-online) / 0.5);
+}
+
+/* Dotted canvas behind the network tree. */
+@utility dot-grid {
+  background-image: radial-gradient(hsl(var(--color-border)) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 /*
