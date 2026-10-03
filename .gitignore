@@ -75,3 +75,4 @@ playwright-report/
 
 #mcptesting/ (for umanga)
 mcptesting/
+node_modules

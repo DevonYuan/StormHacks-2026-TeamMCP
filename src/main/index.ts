@@ -13,6 +13,7 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
 import { spawn, ChildProcess } from "node:child_process";
+import { cpus, freemem, loadavg, totalmem } from "node:os";
 import {
   GatewayConfig,
   GatewayConfigSchema,
@@ -31,6 +32,7 @@ import {
   ServerHealth,
   GatewayStatus,
 } from "../shared/activity.js";
+import type { HostStats } from "../shared/types.js";
 import pino from "pino";
 
 const logger = pino({ name: "main" });
@@ -75,6 +77,7 @@ const IPC_CHANNELS = {
 
   // Health
   HEALTH_GET: "health:get",
+  HOST_STATS: "host:stats",
 
   // Config
   CONFIG_GET: "config:get",
@@ -322,8 +325,32 @@ async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+// CPU % is the busy share of all core time since the previous call.
+let prevCpus = cpus();
+function hostStats(): HostStats {
+  const now = cpus();
+  let busy = 0;
+  let total = 0;
+  now.forEach((c, i) => {
+    const sum = (t: typeof c.times): number => t.user + t.nice + t.sys + t.irq + t.idle;
+    const dt = sum(c.times) - sum(prevCpus[i].times);
+    total += dt;
+    busy += dt - (c.times.idle - prevCpus[i].times.idle);
+  });
+  prevCpus = now;
+  return {
+    cpu: total ? (busy / total) * 100 : 0,
+    cores: now.length,
+    memUsed: totalmem() - freemem(),
+    memTotal: totalmem(),
+    load: loadavg()[0],
+  };
+}
+
 // IPC Handlers
 function setupIpcHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.HOST_STATS, hostStats);
+
   // Gateway control
   ipcMain.handle(IPC_CHANNELS.GATEWAY_START, async () => {
     await startGateway();

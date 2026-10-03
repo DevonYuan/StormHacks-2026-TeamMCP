@@ -17,6 +17,7 @@ import type {
   GatewayStatus,
   GatewayConfig,
 } from '../shared/index.js'
+import type { HostStats } from '../shared/types.js'
 
 // Type-safe IPC channel definitions
 type IpcChannels =
@@ -48,6 +49,7 @@ type IpcChannels =
   | 'event:gatewayStatus'
   | 'event:toolsChanged'
   | 'protocol:url'
+  | 'host:stats'
 
 // Helper for typed invoke
 function invoke<Args extends unknown[], Return>(channel: IpcChannels, ...args: Args): Promise<Return> {
@@ -105,6 +107,11 @@ const api = {
     prune: (olderThanMs: number) => invoke<[number], { success: boolean; count: number }>('activity:prune', olderThanMs),
     onActivity: (listener: (entry: ActivityEntry) => void) =>
       on('event:activity', listener),
+  },
+
+  // Host machine CPU/memory
+  host: {
+    stats: () => invoke<[], HostStats>('host:stats'),
   },
 
   // Health monitoring

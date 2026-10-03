@@ -1,115 +1,207 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { Sidebar, Header, GatewayStatusBadge } from './components/Layout'
-import { ServersPage } from './pages/ServersPage'
-import { PolicyPage } from './pages/PolicyPage'
-import { ActivityPage } from './pages/ActivityPage'
-import { HealthPage } from './pages/HealthPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { useGatewayStatus, useServers, usePolicy } from './hooks'
+import { useEffect, useState } from 'react'
+import Home from './pages/Home'
+import { devices, host, servers } from './mock'
 
-function Navigation() {
-  const navItems = [
-    { path: '/', label: 'Servers', icon: 'server' },
-    { path: '/policy', label: 'Policy', icon: 'shield' },
-    { path: '/activity', label: 'Activity', icon: 'activity' },
-    { path: '/health', label: 'Health', icon: 'heart-pulse' },
-    { path: '/settings', label: 'Settings', icon: 'settings' },
-  ]
+type Page = 'Network' | 'Machines' | 'Settings'
 
+const isMac = navigator.userAgent.includes('Mac')
+const blocked = devices.filter((d) => d.status === 'blocked').length
+const online = devices.filter((d) => d.status === 'online').length
+
+function Icon({ page }: { page: Page }): React.JSX.Element {
+  const common = {
+    viewBox: '0 0 20 20',
+    className: 'size-[18px] shrink-0',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    'aria-hidden': true
+  }
+  if (page === 'Network')
+    return (
+      <svg {...common}>
+        <circle cx="4" cy="10" r="2" />
+        <circle cx="16" cy="4.5" r="2" />
+        <circle cx="16" cy="15.5" r="2" />
+        <path d="M6 10c4 0 4-5.5 8-5.5M6 10c4 0 4 5.5 8 5.5" />
+      </svg>
+    )
+  if (page === 'Machines')
+    return (
+      <svg {...common}>
+        <rect x="3.5" y="4" width="13" height="9" rx="1.5" />
+        <path d="M1.5 16h17" />
+      </svg>
+    )
   return (
-    <Sidebar>
-      <nav className="flex-1 space-y-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              }`
-            }
-          >
-            <Icon name={item.icon} className="h-5 w-5" />
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </nav>
-    </Sidebar>
+    <svg {...common}>
+      <path d="M3 6h7M14 6h3M3 14h3M10 14h7" />
+      <circle cx="12" cy="6" r="2" />
+      <circle cx="8" cy="14" r="2" />
+    </svg>
   )
 }
 
-function Icon({ name, className }: { name: string; className?: string }) {
-  // Simple inline icons - in production use lucide-react
-  const icons: Record<string, JSX.Element> = {
-    server: (
-      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-        <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-        <line x1="6" y1="6" x2="6.01" y2="6" />
-        <line x1="6" y1="18" x2="6.01" y2="18" />
-      </svg>
-    ),
-    shield: (
-      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    ),
-    activity: (
-      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-    ),
-    'heart-pulse': (
-      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 12 17.66" />
-        <path d="M23 19V21" />
-        <path d="M17 19V21" />
-        <path d="M11 19V21" />
-        <path d="M5 19V21" />
-      </svg>
-    ),
-    settings: (
-      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-    ),
-  }
-  return icons[name] || null
-}
+const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
+  { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
+  { page: 'Machines', badge: { text: devices.length, alert: false } },
+  { page: 'Settings' }
+]
 
-function AppContent() {
-  const { data: gatewayStatus } = useGatewayStatus()
-  const { data: servers } = useServers()
-  const { data: policy } = usePolicy()
+function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
+  const [running, setRunning] = useState(true)
 
   return (
-    <div className="flex h-screen bg-background">
-      <Navigation />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header>
-          <GatewayStatusBadge status={gatewayStatus} />
-        </Header>
-        <main className="flex-1 overflow-auto p-6">
-          <Routes>
-            <Route path="/" element={<ServersPage servers={servers || []} />} />
-            <Route path="/policy" element={<PolicyPage policy={policy} />} />
-            <Route path="/activity" element={<ActivityPage />} />
-            <Route path="/health" element={<HealthPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </main>
+    <aside className="row-span-2 flex flex-col border-r border-line bg-rail px-3 py-5">
+      <div className="flex items-center gap-2.5 px-2">
+        <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
+          <rect width="32" height="32" rx="7" className="fill-signal" />
+          <path
+            d="M9 22 L15 10 M17 22 L23 10"
+            className="stroke-white"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="leading-tight">
+          <div className="text-[15px] font-semibold tracking-tight">Team MCP</div>
+          <div className="text-xs text-muted">Gateway</div>
+        </div>
       </div>
+
+      <nav className="mt-7 flex flex-col gap-0.5">
+        {nav.map(({ page: p, badge }, i) => {
+          const active = p === page
+          return (
+            <button
+              key={p}
+              onClick={() => onPage(p)}
+              aria-current={active ? 'page' : undefined}
+              className={`group flex items-center gap-3 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-signal ${
+                active
+                  ? 'border-line bg-card font-medium text-ink shadow-[0_1px_2px_rgb(17_17_17/0.05)]'
+                  : 'border-transparent text-muted hover:bg-black/[0.035] hover:text-ink'
+              }`}
+            >
+              <span className={active ? 'text-signal' : ''}>
+                <Icon page={p} />
+              </span>
+              {p}
+              <kbd className="ml-auto font-mono text-[10px] text-faint opacity-0 transition-opacity group-hover:opacity-100">
+                {isMac ? '⌘' : 'Ctrl '}
+                {i + 1}
+              </kbd>
+              {badge && (
+                <span
+                  className={`min-w-5 rounded-md px-1.5 text-center text-[11px] font-medium tabular-nums ${
+                    badge.alert ? 'bg-signal/12 text-signal' : 'bg-black/[0.05] text-muted'
+                  }`}
+                  title={badge.alert ? `${badge.text} blocked attempt(s)` : undefined}
+                >
+                  {badge.text}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="mt-8 px-2.5">
+        <div className="text-[11px] font-medium tracking-wide text-faint uppercase">
+          Shared servers
+        </div>
+        <ul className="mt-2.5 flex flex-col gap-2">
+          {servers.map((s) => (
+            <li key={s.id} className="flex items-center gap-2.5 font-mono text-[12.5px]">
+              <span className={`size-1.5 rounded-full ${s.running ? 'bg-online' : 'bg-faint'}`} />
+              <span className={s.running ? 'text-ink' : 'text-muted'}>{s.id}</span>
+              <span className="ml-auto text-[11px] text-faint">{s.transport}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-auto rounded-xl border border-line bg-card p-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <span
+            className={`size-2 rounded-full ${running ? 'bg-online motion-safe:animate-breathe' : 'bg-faint'}`}
+          />
+          {running ? 'Gateway running' : 'Gateway paused'}
+          {/* ponytail: UI-only toggle until the gateway process exposes start/stop over IPC. */}
+          <button
+            onClick={() => setRunning(!running)}
+            aria-label={running ? 'Pause gateway' : 'Start gateway'}
+            className="ml-auto rounded-md p-1 text-muted hover:bg-black/[0.05] hover:text-ink"
+          >
+            <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
+              {running ? (
+                <path d="M4 3h2.5v10H4zM9.5 3H12v10H9.5z" />
+              ) : (
+                <path d="M4.5 2.5v11L13 8z" />
+              )}
+            </svg>
+          </button>
+        </div>
+        <div className="mt-1.5 font-mono text-[11px] text-muted tabular-nums">
+          {host.ip}:{host.port}
+        </div>
+        <div className="mt-2.5 flex gap-3 text-xs text-muted">
+          <span>
+            <span className="font-medium text-ink tabular-nums">{online}</span> online
+          </span>
+          <span>
+            <span className="font-medium text-signal tabular-nums">{blocked}</span> blocked
+          </span>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function StatusBar(): React.JSX.Element {
+  return (
+    <footer className="flex h-8 items-center gap-5 border-t border-line bg-surface px-5 font-mono text-[11px] text-muted">
+      <span className="flex items-center gap-1.5">
+        <span className="size-1.5 rounded-full bg-online" />
+        tailnet
+      </span>
+      <span>{host.dns}</span>
+      <span>
+        {host.sharedServers} servers · {devices.length} devices
+      </span>
+      <span>uptime {host.uptime}</span>
+      <span className="ml-auto">v0.1.0</span>
+    </footer>
+  )
+}
+
+function App(): React.JSX.Element {
+  const [page, setPage] = useState<Page>('Network')
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const target = nav[Number(e.key) - 1]
+      if ((e.metaKey || e.ctrlKey) && target) {
+        e.preventDefault()
+        setPage(target.page)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  return (
+    <div className="grid h-screen grid-cols-[236px_1fr] grid-rows-[1fr_auto]">
+      <Sidebar page={page} onPage={setPage} />
+      <main className="overflow-y-auto">
+        <div className="mx-auto max-w-[1440px] px-6 py-6">
+          {page === 'Network' ? <Home /> : <p className="text-muted">{page} is coming next.</p>}
+        </div>
+      </main>
+      <StatusBar />
     </div>
   )
 }
 
-export default function App() {
-  return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
-  )
-}
+export default App
