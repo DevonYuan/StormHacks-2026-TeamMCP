@@ -1,0 +1,235 @@
+@import "tailwindcss";
+@config "../../../../tailwind.config.ts";
+
+/*
+ * ============================================================================
+ * Design tokens — single source of truth
+ * ----------------------------------------------------------------------------
+ * Source: Variant "CORE.OS Fleet Manager" (dark theme)
+ * https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
+ *
+ * Every colour is stored as HSL *channels* ("H S% L%") — no hsl() wrapper and
+ * no hex — so they can be consumed as hsl(var(--token)) and still support
+ * Tailwind opacity modifiers (e.g. bg-brand/50).
+ *
+ * TEAM RULE: never hardcode a hex, rgb(), or inline style colour. Add a token
+ * here and a named class in tailwind.config.ts instead.
+ * ============================================================================
+ */
+:root {
+  /* ------------------------------------------------------------------------
+   * 1. Raw palette — design colour name -> HSL of the source hex.
+   *    These are the only place the literal design values live.
+   * ---------------------------------------------------------------------- */
+  /* Brand colours */
+  --mcp-indigo-100: 226 100% 94%; /* #E0E7FF */
+  --mcp-indigo-400: 234 89% 74%; /* #818CF8 */
+  --mcp-indigo-500: 239 84% 67%; /* #6366F1 */
+  --mcp-indigo-600: 243 75% 59%; /* #4F46E5 */
+  --mcp-indigo-950: 244 47% 20%; /* #1E1B4B */
+  --mcp-cyan-400: 188 86% 53%; /* #22D3EE */
+
+  /* Neutral colours */
+  --mcp-white: 0 0% 100%; /* #FFFFFF */
+  --mcp-slate-200: 214 32% 91%; /* #E2E8F0 */
+  --mcp-slate-400: 215 20% 65%; /* #94A3B8 */
+  --mcp-slate-500: 215 16% 47%; /* #64748B */
+  --mcp-slate-600: 215 19% 35%; /* #475569 */
+  --mcp-slate-700: 215 25% 27%; /* #334155 */
+  --mcp-slate-800: 217 33% 17%; /* #1E293B */
+  --mcp-slate-900: 222 47% 11%; /* #0F172A */
+  --mcp-navy: 222 49% 7%; /* #090E1A */
+  --mcp-gray-950: 224 71% 4%; /* #030712 */
+
+  /* Semantic colours */
+  --mcp-emerald-400: 158 64% 52%; /* #34D399 */
+  --mcp-amber-400: 43 96% 56%; /* #FBBF24 */
+  --mcp-rose-500: 350 89% 60%; /* #F43F5E */
+
+  /* ------------------------------------------------------------------------
+   * 2. Semantic tokens — what the app/components actually reference.
+   *    Each points at a raw palette value above.
+   * ---------------------------------------------------------------------- */
+  --color-brand: var(--mcp-indigo-600); /* primary buttons, logo tile */
+  --color-brand-hover: var(--mcp-indigo-500); /* hover, active nav bar, progress */
+  --color-brand-text: var(--mcp-indigo-400); /* eyebrows, badges, links on dark */
+  --color-brand-light: var(--mcp-indigo-100); /* active nav text */
+  --color-brand-subtle: var(--mcp-indigo-950); /* tinted panels (plan card) */
+  --color-brand-secondary: var(--mcp-cyan-400); /* gradient partner, IPs */
+
+  /* Gateway / MCP server health */
+  --color-status-online: var(--mcp-cyan-400);
+  --color-status-degraded: var(--mcp-amber-400);
+  --color-status-offline: var(--mcp-rose-500);
+  --color-status-idle: var(--mcp-slate-700);
+  --color-success: var(--mcp-emerald-400); /* positive trends (+4%) */
+
+  --color-surface: var(--mcp-gray-950); /* app background, header */
+  --color-surface-sidebar: var(--mcp-navy);
+  --color-surface-raised: var(--mcp-slate-900); /* cards, inputs, secondary buttons */
+  --color-surface-muted: var(--mcp-slate-800); /* hover rows, icon tiles */
+
+  --color-border: var(--mcp-slate-800);
+  --color-border-strong: var(--mcp-slate-700);
+
+  --color-ink-heading: var(--mcp-white); /* page titles, stat values */
+  --color-ink-emphasis: var(--mcp-slate-200); /* button + input text */
+  --color-ink: var(--mcp-slate-400); /* body text */
+  --color-ink-muted: var(--mcp-slate-500); /* labels, secondary text */
+  --color-ink-subtle: var(--mcp-slate-600); /* section headers, disabled */
+
+  /* ------------------------------------------------------------------------
+   * 3. Typography — family stacks consumed by tailwind.config.ts.
+   *    The whole UI is monospace. These are OS-installed fonts (Consolas on
+   *    Windows, Menlo/Monaco on macOS), so nothing is bundled.
+   * ---------------------------------------------------------------------- */
+  --font-mono: Consolas, Menlo, Monaco, "Courier New", monospace;
+  --font-body: var(--font-mono);
+  --font-heading: var(--font-mono);
+
+  /* ------------------------------------------------------------------------
+   * 4. Radius & layout.
+   * ---------------------------------------------------------------------- */
+  --radius: 0.75rem; /* 12px — buttons, inputs; cards use radius + 4px */
+  --titlebar-height: 2.5rem;
+  --header-height: 4rem; /* 64px */
+  --sidebar-width: 16rem; /* 256px */
+
+  /* ------------------------------------------------------------------------
+   * 5. shadcn/ui contract — every value points at a token above, so any
+   *    shadcn component inherits the palette automatically and we never set
+   *    a standalone colour here.
+   * ---------------------------------------------------------------------- */
+  --background: var(--color-surface);
+  --foreground: var(--color-ink-emphasis);
+
+  --card: var(--color-surface-raised);
+  --card-foreground: var(--color-ink-emphasis);
+
+  --popover: var(--color-surface-raised);
+  --popover-foreground: var(--color-ink-emphasis);
+
+  --primary: var(--color-brand);
+  --primary-foreground: var(--mcp-white);
+
+  --secondary: var(--color-surface-raised);
+  --secondary-foreground: var(--color-ink-emphasis);
+
+  --muted: var(--color-surface-muted);
+  --muted-foreground: var(--color-ink-muted);
+
+  --accent: var(--color-surface-muted);
+  --accent-foreground: var(--color-ink-heading);
+
+  --destructive: var(--color-status-offline);
+  --destructive-foreground: var(--mcp-white);
+
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-brand-hover);
+}
+
+/*
+ * ============================================================================
+ * Base — desktop-app defaults
+ * ============================================================================
+ */
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  /* The window never scrolls as a whole; individual panes do. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--color-ink));
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    /* Native apps don't let users select UI chrome; opt back in with `select-text`. */
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  pre,
+  code {
+    user-select: text;
+  }
+
+  img,
+  a {
+    -webkit-user-drag: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--color-surface));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--color-surface-muted));
+    border-radius: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--color-border-strong));
+  }
+}
+
+/*
+ * ============================================================================
+ * Design utilities — recurring effects from the design that aren't a single
+ * Tailwind class. Defined with @utility so variants (hover:, md:) work.
+ * ============================================================================
+ */
+
+/* Translucent card: stat tiles, tables. Pair with `rounded-xl` (16px). */
+@utility glass-card {
+  background: hsl(var(--color-surface-raised) / 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--color-border) / 0.5);
+}
+
+/* Selected sidebar nav item. */
+@utility sidebar-active {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--color-brand-hover) / 0.15) 0%,
+    hsl(var(--color-brand-hover) / 0) 100%
+  );
+  color: hsl(var(--color-brand-light));
+  border-left: 3px solid hsl(var(--color-brand-hover));
+}
+
+/* Halo around an online status dot. */
+@utility status-glow-online {
+  box-shadow: 0 0 10px hsl(var(--color-status-online) / 0.5);
+}
+
+/*
+ * ============================================================================
+ * Electron utilities — required for frameless windows
+ * (`frame: false` / `titleBarStyle: "hidden"`). Put `no-drag` on any
+ * interactive element inside a `drag-region`.
+ * ============================================================================
+ */
+@utility drag-region {
+  -webkit-app-region: drag;
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
