@@ -113,7 +113,7 @@ function createWindow(): void {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(__dirname, "../../frontend/preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -127,7 +127,7 @@ function createWindow(): void {
     mainWindow.loadURL(rendererUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    mainWindow.loadFile(join(__dirname, "../../frontend/renderer/index.html"));
   }
 
   mainWindow.once("ready-to-show", () => {
@@ -158,7 +158,7 @@ function startGateway(): Promise<void> {
 
     // Determine gateway entry point
     const gatewayEntry = isDev
-      ? join(__dirname, "../../src/gateway/index.ts") // tsx will handle this
+      ? join(__dirname, "../../../src/backend/gateway/index.ts") // tsx will handle this
       : join(__dirname, "../gateway/index.js");
 
     const args = isDev

@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["../src/gateway/**/*", "../src/shared/**/*"]
+  "include": ["../src/backend/gateway/**/*", "../src/backend/shared/**/*"]
 }

@@ -4,15 +4,15 @@
   "private": true,
   "description": "Team MCP Gateway - Share your local MCP ecosystem with your team",
   "author": "Team MCP",
-  "main": "dist/main/index.js",
+  "main": "dist/backend/main/index.js",
   "scripts": {
     "dev": "electron-vite dev -c config/electron.vite.config.ts",
     "dev:all": "concurrently \"npm:dev\" \"npm:gateway:dev\"",
     "dev:clean": "npm run kill && rm -rf node_modules/.vite && npm run dev:all",
-    "gateway:dev": "tsx watch src/gateway/index.ts",
+    "gateway:dev": "tsx watch src/backend/gateway/index.ts",
     "gateway:logs": "tail -f logs/gateway.log 2>/dev/null || echo 'No gateway logs yet'",
     "build": "npm run typecheck && electron-vite build -c config/electron.vite.config.ts && npm run build:gateway",
-    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/gateway/db && cp src/gateway/db/schema.sql dist/gateway/db/schema.sql",
+    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/backend/gateway/db && cp src/backend/gateway/db/schema.sql dist/backend/gateway/db/schema.sql",
     "rebuild": "@electron/rebuild",
     "start": "electron-vite preview -c config/electron.vite.config.ts",
     "typecheck": "tsc --noEmit -p config/tsconfig.main.json && tsc --noEmit -p config/tsconfig.preload.json && tsc --noEmit -p config/tsconfig.gateway.json && tsc --noEmit -p config/tsconfig.renderer.json",
@@ -26,7 +26,7 @@
     "test:ci": "npm run typecheck && npm run lint && npm test",
     "test:e2e": "playwright test --config config/playwright.config.ts",
     "inspector": "npx @modelcontextprotocol/inspector",
-    "db:migrate": "tsx src/gateway/db/migrate.ts",
+    "db:migrate": "tsx src/backend/gateway/db/migrate.ts",
     "db:reset": "rm -f gateway.db && npm run db:migrate",
     "package": "electron-builder",
     "check:types": "npm run typecheck",
@@ -83,15 +83,13 @@
       "output": "dist"
     },
     "files": [
-      "dist/main/**",
-      "dist/preload/**",
-      "dist/renderer/**",
-      "dist/gateway/**",
+      "dist/backend/**",
+      "dist/frontend/**",
       "!**/*.map"
     ],
     "extraResources": [
       {
-        "from": "src/gateway/db/schema.sql",
+        "from": "src/backend/gateway/db/schema.sql",
         "to": "gateway/db/schema.sql"
       }
     ],

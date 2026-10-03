@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getTestDb, getTestRepos, cleanupTestDb } from './setup.js'
-import { ServerConfig, TransportType } from '../../src/shared/protocol.js'
+import { ServerConfig, TransportType } from '../../src/backend/shared/protocol.js'
 
 describe('Database Repositories', () => {
   let repos: ReturnType<typeof getTestRepos>

@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["../src/preload/**/*", "../src/shared/**/*"]
+  "include": ["../src/frontend/preload/**/*", "../src/backend/shared/**/*"]
 }
