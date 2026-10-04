@@ -3,14 +3,13 @@ import type { Config } from "tailwindcss";
 /**
  * Design tokens — single source of truth
  * --------------------------------------------------------------------------
- * The literal values (HSL colours, font stacks, radius) live as CSS variables
- * in `src/renderer/src/styles/globals.css`.
- * Source: Variant "CORE.OS Fleet Manager" (dark theme)
- * https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
+ * The literal values (colours, font stacks, radius) live as CSS variables in
+ * `src/renderer/src/styles/globals.css`, with a light and a dark theme.
  *
  * This file only maps those variables to *named* utility classes
  * (e.g. `bg-status-blocked`, `text-brand`, `text-h1`). Colours are wired as
- * `hsl(var(--token) / <alpha-value>)` so opacity modifiers keep working.
+ * `var(--token)`; Tailwind applies opacity modifiers (`bg-brand/50`) with
+ * color-mix(), so they work on every colour.
  *
  * TEAM RULE: if a class you need does not exist, add the token in globals.css
  * and the class here first, then PR it. Never hardcode a hex/rgb.
@@ -22,71 +21,71 @@ const config: Config = {
       colors: {
         /* shadcn/ui semantic roles — resolve through globals.css. */
         border: {
-          DEFAULT: "hsl(var(--border) / <alpha-value>)",
-          strong: "hsl(var(--color-border-strong) / <alpha-value>)",
+          DEFAULT: "var(--border)",
+          strong: "var(--color-border-strong)",
         },
-        input: "hsl(var(--input) / <alpha-value>)",
-        ring: "hsl(var(--ring) / <alpha-value>)",
-        background: "hsl(var(--background) / <alpha-value>)",
-        foreground: "hsl(var(--foreground) / <alpha-value>)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
         primary: {
-          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
-          foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
-          foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
-          foreground: "hsl(var(--muted-foreground) / <alpha-value>)",
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
-          foreground: "hsl(var(--accent-foreground) / <alpha-value>)",
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
-          foreground: "hsl(var(--destructive-foreground) / <alpha-value>)",
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
         },
         card: {
-          DEFAULT: "hsl(var(--card) / <alpha-value>)",
-          foreground: "hsl(var(--card-foreground) / <alpha-value>)",
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
         },
         popover: {
-          DEFAULT: "hsl(var(--popover) / <alpha-value>)",
-          foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
+          DEFAULT: "var(--popover)",
+          foreground: "var(--popover-foreground)",
         },
 
         /* Brand tokens. */
         brand: {
-          DEFAULT: "hsl(var(--color-brand) / <alpha-value>)",
-          hover: "hsl(var(--color-brand-hover) / <alpha-value>)",
-          text: "hsl(var(--color-brand-text) / <alpha-value>)",
-          light: "hsl(var(--color-brand-light) / <alpha-value>)",
-          subtle: "hsl(var(--color-brand-subtle) / <alpha-value>)",
-          secondary: "hsl(var(--color-brand-secondary) / <alpha-value>)",
+          DEFAULT: "var(--color-brand)",
+          hover: "var(--color-brand-hover)",
+          text: "var(--color-brand-text)",
+          light: "var(--color-brand-light)",
+          subtle: "var(--color-brand-subtle)",
+          secondary: "var(--color-brand-secondary)",
         },
         status: {
-          online: "hsl(var(--color-status-online) / <alpha-value>)",
-          offline: "hsl(var(--color-status-offline) / <alpha-value>)",
-          blocked: "hsl(var(--color-status-blocked) / <alpha-value>)",
-          degraded: "hsl(var(--color-status-degraded) / <alpha-value>)",
+          online: "var(--color-status-online)",
+          offline: "var(--color-status-offline)",
+          blocked: "var(--color-status-blocked)",
+          degraded: "var(--color-status-degraded)",
         },
-        success: "hsl(var(--color-success) / <alpha-value>)",
-        host: "hsl(var(--color-host) / <alpha-value>)",
+        success: "var(--color-success)",
+        host: "var(--color-host)",
         surface: {
-          DEFAULT: "hsl(var(--color-surface) / <alpha-value>)",
-          sidebar: "hsl(var(--color-surface-sidebar) / <alpha-value>)",
-          raised: "hsl(var(--color-surface-raised) / <alpha-value>)",
-          muted: "hsl(var(--color-surface-muted) / <alpha-value>)",
+          DEFAULT: "var(--color-surface)",
+          sidebar: "var(--color-surface-sidebar)",
+          raised: "var(--color-surface-raised)",
+          muted: "var(--color-surface-muted)",
         },
         ink: {
-          DEFAULT: "hsl(var(--color-ink) / <alpha-value>)",
-          heading: "hsl(var(--color-ink-heading) / <alpha-value>)",
-          emphasis: "hsl(var(--color-ink-emphasis) / <alpha-value>)",
-          muted: "hsl(var(--color-ink-muted) / <alpha-value>)",
-          subtle: "hsl(var(--color-ink-subtle) / <alpha-value>)",
+          DEFAULT: "var(--color-ink)",
+          heading: "var(--color-ink-heading)",
+          emphasis: "var(--color-ink-emphasis)",
+          muted: "var(--color-ink-muted)",
+          subtle: "var(--color-ink-subtle)",
         },
       },
 
@@ -130,8 +129,8 @@ const config: Config = {
       },
 
       boxShadow: {
-        host: "0 12px 32px -12px hsl(var(--color-shadow) / 0.5)", // host card in the network tree
-        "card-focus": "0 10px 28px -14px hsl(var(--color-shadow) / 0.35)", // selected device card
+        host: "0 12px 32px -12px color-mix(in srgb, var(--color-shadow) 50%, transparent)", // host card in the network tree
+        "card-focus": "0 10px 28px -14px color-mix(in srgb, var(--color-shadow) 35%, transparent)", // selected device card
       },
 
       spacing: {
@@ -155,8 +154,8 @@ const config: Config = {
 
       keyframes: {
         breathe: {
-          "0%, 100%": { boxShadow: "0 0 0 0 hsl(var(--color-status-online) / 0.35)" },
-          "50%": { boxShadow: "0 0 0 6px hsl(var(--color-status-online) / 0)" },
+          "0%, 100%": { boxShadow: "0 0 0 0 color-mix(in srgb, var(--color-status-online) 35%, transparent)" },
+          "50%": { boxShadow: "0 0 0 6px transparent" },
         },
       },
       animation: {
