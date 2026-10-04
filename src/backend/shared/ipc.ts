@@ -36,6 +36,12 @@ export const IPC_CHANNELS = {
   PEERS_ADD: 'peers:add',
   PEERS_REMOVE: 'peers:remove',
 
+  ACCOUNTS_SIGNUP: 'accounts:signup',
+  ACCOUNTS_LOGIN: 'accounts:login',
+  ACCOUNTS_LIST: 'accounts:list',
+  ACCOUNTS_APPROVE: 'accounts:approve',
+  ACCOUNTS_REVOKE: 'accounts:revoke',
+
   EVENT_ACTIVITY: 'event:activity',
   EVENT_SERVER_HEALTH: 'event:serverHealth',
   EVENT_GATEWAY_STATUS: 'event:gatewayStatus',

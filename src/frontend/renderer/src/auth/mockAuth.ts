@@ -5,6 +5,10 @@ export interface AuthUser {
   name: string
   email: string
   createdAt: number
+  accountId?: string
+  tailscaleUser?: string
+  tailnet?: string
+  hostAddress?: string
 }
 
 export interface AuthEvent {
@@ -19,7 +23,7 @@ interface MockAccount extends AuthUser {
   password: string
 }
 
-/** Provide volatile mock accounts and session events until a real auth backend exists. */
+/** Provide volatile demo accounts and session events for browser-only development. */
 export class MockAuthStore {
   private readonly accounts = new Map<string, MockAccount>()
   private readonly events: AuthEvent[] = []

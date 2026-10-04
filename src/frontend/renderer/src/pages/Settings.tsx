@@ -14,6 +14,7 @@ import type { GatewayConfig } from '@shared/config'
 import type { PolicyDocument, PolicyRule } from '@shared/policy'
 import type { ServerConfig } from '@shared/protocol'
 import type { Device } from '@shared/types'
+import type { PublicGatewayAccount } from '@shared/account'
 import { useAuth } from '../auth/AuthContext'
 import { useNetworkData } from '../data/NetworkData'
 
@@ -632,6 +633,93 @@ function AccountActivity(): React.JSX.Element {
   )
 }
 
+/** Let the gateway host approve and revoke accounts linked to its tailnet. */
+function GatewayAccounts(): React.JSX.Element | null {
+  const { mode } = useAuth()
+  const [accounts, setAccounts] = useState<PublicGatewayAccount[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(async (): Promise<void> => {
+    if (mode !== 'server' || !window.electronAPI) return
+    try {
+      setAccounts(await window.electronAPI.accounts.list())
+      setError(null)
+    } catch (reason) {
+      setError(message(reason))
+    }
+  }, [mode])
+
+  useEffect(() => {
+    void reload()
+    const id = window.setInterval(() => void reload(), 5000)
+    return () => window.clearInterval(id)
+  }, [reload])
+
+  if (mode !== 'server') return null
+
+  const updateAccount = async (accountId: string, action: 'approve' | 'revoke'): Promise<void> => {
+    try {
+      if (action === 'approve') await window.electronAPI.accounts.approve(accountId)
+      else await window.electronAPI.accounts.revoke(accountId)
+      await reload()
+    } catch (reason) {
+      setError(message(reason))
+    }
+  }
+
+  return (
+    <Section title="Gateway accounts" hint="Approve a Tailscale user once to allow their devices to reconnect. Revoking an account closes its active MCP sessions.">
+      {error && <p role="alert" className="mb-3 text-body-small text-status-blocked">{error}</p>}
+      {accounts.filter(account => account.status === 'pending').length > 0 ? (
+        <>
+          <h3 className="mb-2 text-h5 text-ink-muted uppercase">Waiting for approval</h3>
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {accounts.filter(account => account.status === 'pending').map(account => (
+            <li key={account.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-body-small font-medium text-ink-emphasis">
+                  {account.name} · {account.email}
+                </div>
+                <div className="truncate text-caption text-ink">
+                  Tailscale: {account.tailscaleUser} · {account.tailnet}
+                </div>
+              </div>
+              <button type="button" onClick={() => void updateAccount(account.id, 'approve')} className={primaryButton}>
+                Approve
+              </button>
+            </li>
+          ))}
+        </ul>
+        </>
+      ) : (
+        <p className="text-body-small text-ink">No accounts waiting for approval.</p>
+      )}
+      {accounts.some(account => account.status === 'approved') && (
+        <div className="mt-5">
+          <h3 className="mb-2 text-h5 text-ink-muted uppercase">Approved accounts</h3>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {accounts.filter(account => account.status === 'approved').map(account => (
+              <li key={account.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-body-small font-medium text-ink-emphasis">
+                    {account.name} · {account.email}
+                  </div>
+                  <div className="truncate text-caption text-ink">
+                    Tailscale: {account.tailscaleUser} · {account.tailnet}
+                  </div>
+                </div>
+                <button type="button" onClick={() => void updateAccount(account.id, 'revoke')} className={secondaryButton}>
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 export default function Settings(): React.JSX.Element {
   const { available, devices } = useNetworkData()
   const [snap, setSnap] = useState<Snapshot>(EMPTY)
@@ -672,6 +760,9 @@ export default function Settings(): React.JSX.Element {
 
       <div className="mb-6">
         <AccountActivity />
+      </div>
+      <div className="mb-6">
+        <GatewayAccounts />
       </div>
 
       {error && (

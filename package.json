@@ -12,7 +12,7 @@
     "gateway:dev": "tsx watch src/backend/gateway/index.ts",
     "gateway:logs": "tail -f logs/gateway.log 2>/dev/null || echo 'No gateway logs yet'",
     "build": "npm run typecheck && electron-vite build -c config/electron.vite.config.ts && npm run build:gateway",
-    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/backend/gateway/db && cp src/backend/gateway/db/schema.sql dist/backend/gateway/db/schema.sql",
+    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/backend/gateway/db/migrations && cp src/backend/gateway/db/schema.sql dist/backend/gateway/db/schema.sql && cp src/backend/gateway/db/migrations/002_gateway_accounts.sql dist/backend/gateway/db/migrations/002_gateway_accounts.sql",
     "rebuild": "@electron/rebuild",
     "start": "electron-vite preview -c config/electron.vite.config.ts",
     "typecheck": "tsc --noEmit -p config/tsconfig.main.json && tsc --noEmit -p config/tsconfig.preload.json && tsc --noEmit -p config/tsconfig.gateway.json && tsc --noEmit -p config/tsconfig.renderer.json",
@@ -91,6 +91,10 @@
       {
         "from": "src/backend/gateway/db/schema.sql",
         "to": "gateway/db/schema.sql"
+      },
+      {
+        "from": "src/backend/gateway/db/migrations/002_gateway_accounts.sql",
+        "to": "gateway/db/migrations/002_gateway_accounts.sql"
       }
     ],
     "mac": {

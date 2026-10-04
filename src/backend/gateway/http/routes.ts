@@ -2,13 +2,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Logger } from 'pino'
 import { ZodError } from 'zod'
 import type { AuthManager } from '../auth/auth.js'
+import { handleAccountDevices, handleAccountManagementApi, handlePublicAccountAuth } from './api/accounts.js'
 import { isManagementRequestAllowed } from '../http-access.js'
 import { handleActivityApi, handlePolicyApi } from './api/policy-activity.js'
 import { handlePeersApi, handleShareApi, handleTailscaleApi } from './api/network.js'
 import { handleServersApi } from './api/servers.js'
 import { handleHealthApi, handleStatusApi } from './api/status.js'
 import type { HttpContext } from './context.js'
-import { CORS_HEADERS, readJson, sendJson } from './response.js'
+import { CORS_HEADERS, sendJson } from './response.js'
 
 export type { HttpContext } from './context.js'
 
@@ -46,6 +47,15 @@ export class GatewayHttpRouter {
 
       if (path === '/auth/token' && req.method === 'POST') {
         await this.handleTokenExchange(req, res, ctx.authManager)
+        return
+      }
+
+      if (path === '/auth/signup' || path === '/auth/login') {
+        await handlePublicAccountAuth(req, res, path.endsWith('signup') ? 'signup' : 'login', ctx)
+        return
+      }
+      if (path === '/auth/devices') {
+        await handleAccountDevices(req, res, ctx)
         return
       }
 
@@ -100,6 +110,8 @@ export class GatewayHttpRouter {
         return
       case 'servers':
         return handleServersApi(req, res, id, action, ctx)
+      case 'accounts':
+        return handleAccountManagementApi(req, res, id, action, ctx)
       case 'share':
         return handleShareApi(req, res, ctx)
       case 'peers':
@@ -123,10 +135,8 @@ export class GatewayHttpRouter {
     res: ServerResponse,
     authManager: AuthManager,
   ): Promise<void> {
-    const body = await readJson(req)
-
     try {
-      const clientIp = typeof body.clientIp === 'string' ? body.clientIp : '127.0.0.1'
+      const clientIp = req.socket.remoteAddress ?? ''
       const result = await authManager.authenticateConnection(clientIp)
       sendJson(res, 200, result)
     } catch (error: unknown) {

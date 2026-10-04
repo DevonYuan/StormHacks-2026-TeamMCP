@@ -153,6 +153,23 @@ export async function getLocalTailnetInfo(config: GatewayConfig): Promise<{ ip: 
   }
 }
 
+export async function getLocalTailscaleIdentity(config: GatewayConfig): Promise<Identity | null> {
+  try {
+    const status = await getTailscaleStatus(config)
+    const node = status.Self
+    const user = node.UserID != null ? status.User?.[String(node.UserID)] : undefined
+    if (!user?.LoginName) return null
+    return {
+      user: user.LoginName,
+      device: (node.DNSName || node.HostName || '').replace(/\.$/, ''),
+      deviceId: String(node.ID ?? node.StableID ?? ''),
+      tailnet: user.LoginName.split('@')[1] || status.MagicDNSSuffix || 'unknown',
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Enumerate this machine plus every peer from `tailscale status --json`.
  * The local machine (`Self`) is returned first with `self: true`.

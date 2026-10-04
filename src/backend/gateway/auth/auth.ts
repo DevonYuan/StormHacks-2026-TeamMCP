@@ -7,6 +7,7 @@ import { Identity, AuthResult, TokenClaims } from '../../shared/policy.js'
 import { RevokedTokenRepository } from '../db/repository.js'
 import {
   resolveIdentityFromIp,
+  getLocalTailscaleIdentity,
   getLocalTailnetInfo,
   isTailscaleAvailable,
 } from './tailscale.js'
@@ -14,6 +15,7 @@ import {
   initializeSigningKey,
   getSigningKeyPair,
   exportPrivateKeyBase64,
+  exportPublicKeyBase64,
   createSessionToken,
   verifySessionToken,
   revokeToken,
@@ -25,6 +27,7 @@ export interface AuthContext {
   identity: Identity
   token: string
   claims: TokenClaims
+  accountId?: string
 }
 
 export class AuthManager {
@@ -53,7 +56,7 @@ export class AuthManager {
     if (!kp) return null
     return {
       kid: kp.kid,
-      publicKey: exportPrivateKeyBase64() || '',
+      publicKey: exportPublicKeyBase64() || '',
     }
   }
 
@@ -63,23 +66,7 @@ export class AuthManager {
 
   // Authenticate a connection from a client IP
   async authenticateConnection(clientIp: string): Promise<AuthResult> {
-    // Try Tailscale identity resolution
-    let identity: Identity | null = null
-
-    if (this.tailscaleAvailable && clientIp.startsWith('100.')) {
-      identity = await resolveIdentityFromIp(clientIp, this.config)
-    }
-
-    // Fallback for local development (loopback)
-    if (!identity && (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp.startsWith('192.168.') || clientIp.startsWith('10.'))) {
-      // Local development identity
-      identity = {
-        user: 'local@dev',
-        device: 'localhost',
-        deviceId: 'local-dev-device',
-        tailnet: 'local',
-      }
-    }
+    const identity = await this.resolveClientIdentity(clientIp)
 
     if (!identity) {
       return {
@@ -101,6 +88,25 @@ export class AuthManager {
       identity,
       token,
     }
+  }
+
+  async resolveClientIdentity(clientIp: string): Promise<Identity | null> {
+    const normalized = clientIp.startsWith('::ffff:') ? clientIp.slice(7) : clientIp
+    if (normalized === '127.0.0.1' || normalized === '::1') {
+      const localIdentity = await getLocalTailscaleIdentity(this.config)
+      if (localIdentity) return localIdentity
+      if (process.env.NODE_ENV !== 'production') {
+        return {
+          user: 'local@dev',
+          device: 'localhost',
+          deviceId: 'local-dev-device',
+          tailnet: 'local',
+        }
+      }
+      return null
+    }
+    if (!this.tailscaleAvailable) return null
+    return resolveIdentityFromIp(normalized, this.config)
   }
 
   // Verify a session token and return claims

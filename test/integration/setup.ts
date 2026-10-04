@@ -62,6 +62,7 @@ vi.mock('../../src/backend/gateway/auth/tailscale.js', () => ({
     deviceId: 'test-device-id',
     tailnet: 'example.com',
   }),
+  getLocalTailscaleIdentity: vi.fn().mockResolvedValue(null),
   isTailscaleAvailable: vi.fn().mockResolvedValue(true),
 }))
 

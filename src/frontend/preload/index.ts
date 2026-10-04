@@ -17,6 +17,7 @@ import type {
   GatewayStatus,
   GatewayConfig,
 } from '../../backend/shared/index.js'
+import type { AccountAuthResult, PublicGatewayAccount } from '../../backend/shared/account.js'
 import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from '../../backend/shared/types.js'
 import { IPC_CHANNELS, type IpcChannel } from '../../backend/shared/ipc.js'
 
@@ -104,9 +105,23 @@ const api = {
     get: () => invoke<[], ShareInfo>('share:get'),
   },
   peers: {
-    add: (address: string, probe = false) =>
-      invoke<[string, boolean], AddPeerResult>('peers:add', address, probe),
+    add: (address: string, probe = false, accountId?: string) =>
+      invoke<[string, boolean, string?], AddPeerResult>('peers:add', address, probe, accountId),
     remove: (id: string) => invoke<[string], { success: boolean }>('peers:remove', id),
+  },
+
+  accounts: {
+    signUp: (address: string, name: string, email: string, password: string) =>
+      invoke<[string, string, string, string], AccountAuthResult>(
+        'accounts:signup', address, name, email, password
+      ),
+    signIn: (address: string, email: string, password: string) =>
+      invoke<[string, string, string], AccountAuthResult>(
+        'accounts:login', address, email, password
+      ),
+    list: () => invoke<[], PublicGatewayAccount[]>('accounts:list'),
+    approve: (id: string) => invoke<[string], PublicGatewayAccount>('accounts:approve', id),
+    revoke: (id: string) => invoke<[string], { success: boolean }>('accounts:revoke', id),
   },
 
   // Health monitoring

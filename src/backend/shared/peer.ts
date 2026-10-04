@@ -48,3 +48,29 @@ export function peerHost(url: string): string {
     return url
   }
 }
+
+/** Compare peer addresses without letting path differences change the gateway identity. */
+export function isSamePeerGateway(address: string, authenticatedAddress: string): boolean {
+  try {
+    return new URL(normalizePeerUrl(address)).origin ===
+      new URL(normalizePeerUrl(authenticatedAddress)).origin
+  } catch {
+    return false
+  }
+}
+
+/** Accept only Tailscale CGNAT addresses or MagicDNS names for account auth. */
+export function isTailscaleAddress(address: string): boolean {
+  let url: URL
+  try {
+    url = new URL(normalizePeerUrl(address))
+  } catch {
+    return false
+  }
+  const host = url.hostname.toLowerCase()
+  if (host.endsWith('.ts.net')) return true
+  const octets = host.split('.').map(Number)
+  return octets.length === 4 &&
+    octets.every(octet => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
+    octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127
+}

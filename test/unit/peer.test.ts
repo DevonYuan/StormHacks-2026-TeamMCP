@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePeerUrl, peerHost } from '@shared/peer'
+import { isSamePeerGateway, normalizePeerUrl, peerHost } from '@shared/peer'
 
 describe('normalizePeerUrl', () => {
   it('adds the default port and /mcp to a bare host', () => {
@@ -35,5 +35,13 @@ describe('peerHost', () => {
 
   it('falls back to the raw value when unparseable', () => {
     expect(peerHost('not a url')).toBe('not a url')
+  })
+})
+
+describe('isSamePeerGateway', () => {
+  it('matches equivalent gateway origins regardless of the MCP path', () => {
+    expect(isSamePeerGateway('100.64.1.2', 'http://100.64.1.2:8788/mcp')).toBe(true)
+    expect(isSamePeerGateway('100.64.1.2:9000', '100.64.1.2:8788')).toBe(false)
+    expect(isSamePeerGateway('invalid', '100.64.1.2')).toBe(false)
   })
 })

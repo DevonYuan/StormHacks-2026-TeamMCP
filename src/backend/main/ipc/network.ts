@@ -41,13 +41,16 @@ export function registerNetworkIpcHandlers({
     return gatewayFetch<ShareInfo>('/api/share')
   })
 
-  ipcMain.handle(IPC_CHANNELS.PEERS_ADD, async (_event, address: string, probe?: boolean) => {
+  ipcMain.handle(
+    IPC_CHANNELS.PEERS_ADD,
+    async (_event, address: string, probe?: boolean, accountId?: string) => {
     await ensureGatewayRunning()
     return gatewayFetch<AddPeerResult>('/api/peers', {
       method: 'POST',
-      body: JSON.stringify({ address, probe: probe === true }),
+      body: JSON.stringify({ address, probe: probe === true, accountId }),
     })
-  })
+    },
+  )
 
   ipcMain.handle(IPC_CHANNELS.PEERS_REMOVE, async (_event, id: string) => {
     await ensureGatewayRunning()

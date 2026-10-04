@@ -27,6 +27,7 @@ import type { Identity, TokenClaims } from '../../shared/policy.js'
 import { MCPClientManager } from './client.js'
 import { PolicyEngine } from '../authz/policy.js'
 import { AuthManager, AuthContext } from '../auth/auth.js'
+import type { GatewayAccountService } from '../auth/accounts.js'
 import { ActivityRepository, ServerHealthRepository } from '../db/repository.js'
 import { GatewayConfig } from '../../shared/config.js'
 import pino from 'pino'
@@ -38,6 +39,7 @@ export interface ProxyServerOptions {
   clientManager: MCPClientManager
   policyEngine: PolicyEngine
   authManager: AuthManager
+  accountService: GatewayAccountService
   activityRepo: ActivityRepository
   healthRepo: ServerHealthRepository
 }
@@ -335,6 +337,24 @@ export class MCPProxyServer {
     this.activeSessions.delete(sessionId)
   }
 
+  async revokeAccountSessions(accountId: string): Promise<void> {
+    const sessionIds = [...this.activeSessions]
+      .filter(([, context]) => context.accountId === accountId)
+      .map(([sessionId]) => sessionId)
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId)
+      this.activeSessions.delete(sessionId)
+      this.sessions.delete(sessionId)
+      if (!session) continue
+      try {
+        await session.transport.close()
+        await session.server.close()
+      } catch (error) {
+        logger.warn({ error, sessionId, accountId }, 'Failed to close revoked account session')
+      }
+    }
+  }
+
   /**
    * Start the proxy server.
    */
@@ -372,12 +392,36 @@ export class MCPProxyServer {
       return
     }
 
+    const identity = await this.options.authManager.resolveClientIdentity(this.clientIp(req))
+    const rawAccountId = req.headers['x-tether-account-id']
+    const accountId = Array.isArray(rawAccountId) ? rawAccountId[0] : rawAccountId
+    const localDevelopment = process.env.NODE_ENV !== 'production' &&
+      (this.clientIp(req) === '127.0.0.1' || this.clientIp(req) === '::1')
+    const account = identity && accountId
+      ? this.options.accountService.authorize(accountId, identity)
+      : undefined
+
+    if ((!identity || (!account && !localDevelopment)) || (accountId && !account)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'An approved gateway account and matching Tailscale identity are required.' },
+        id: null,
+      }))
+      return
+    }
+
     const server = this.createServer()
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {
         this.sessions.set(sid, { server, transport })
-        void this.registerSessionForRequest(sid, req)
+        this.activeSessions.set(sid, {
+          identity: identity!,
+          accountId: account?.id,
+          token: '',
+          claims: this.buildClaims(identity!),
+        })
         logger.debug({ sessionId: sid }, 'Session initialized')
       },
       onsessionclosed: (sid) => {
@@ -406,43 +450,9 @@ export class MCPProxyServer {
       this.handleRequest(req, res, parsedBody)
   }
 
-  /**
-   * Authenticate the peer for a new session and store its context.
-   */
-  private async registerSessionForRequest(sessionId: string, req: IncomingMessage): Promise<void> {
+  private clientIp(req: IncomingMessage): string {
     const rawIp = req.socket?.remoteAddress || '127.0.0.1'
-    const clientIp =
-      rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp === '::1' ? '127.0.0.1' : rawIp
-
-    const result = await this.options.authManager.authenticateConnection(clientIp)
-    if (result.success && result.identity && result.token) {
-      try {
-        const { claims } = this.options.authManager.verifyToken(result.token)
-        this.activeSessions.set(sessionId, { identity: result.identity, token: result.token, claims })
-        return
-      } catch (error) {
-        logger.warn({ error }, 'Failed to verify session token; using resolved identity')
-      }
-      this.activeSessions.set(sessionId, {
-        identity: result.identity,
-        token: result.token,
-        claims: this.buildClaims(result.identity),
-      })
-      return
-    }
-
-    // Fail closed with an explicit local identity so loopback development works.
-    const identity: Identity = {
-      user: 'local@dev',
-      device: 'localhost',
-      deviceId: 'local-dev-device',
-      tailnet: 'local',
-    }
-    this.activeSessions.set(sessionId, {
-      identity,
-      token: '',
-      claims: this.buildClaims(identity),
-    })
+    return rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp === '::1' ? '127.0.0.1' : rawIp
   }
 
   private buildClaims(identity: Identity): TokenClaims {

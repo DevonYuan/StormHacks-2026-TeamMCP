@@ -14,6 +14,8 @@ import type {
   ActivityQuery,
   ActivityStats,
   ServerHealth,
+  GatewayAccount,
+  AccountStatus,
 } from "../../shared/index.js";
 
 // Row types from database
@@ -80,6 +82,131 @@ interface ServerHealthRow {
   latency_ms: number | null;
   error: string | null;
   consecutive_failures: number;
+}
+
+interface GatewayAccountRow {
+  id: string;
+  email: string;
+  name: string;
+  password_hash: string;
+  tailscale_user: string;
+  tailscale_tailnet: string;
+  status: AccountStatus;
+  created_at: number;
+  approved_at: number | null;
+}
+
+export class GatewayAccountRepository {
+  constructor(private db: SqliteDatabase) {}
+
+  private rowToAccount(row: GatewayAccountRow): GatewayAccount {
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      identity: {
+        user: row.tailscale_user,
+        tailnet: row.tailscale_tailnet,
+        device: "",
+        deviceId: "",
+      },
+      status: row.status,
+      createdAt: row.created_at,
+      approvedAt: row.approved_at ?? undefined,
+    }
+  }
+
+  createPending(
+    account: Omit<GatewayAccount, 'id' | 'status' | 'createdAt' | 'approvedAt'>,
+    passwordHash: string,
+  ): GatewayAccount {
+    const id = uuidv4()
+    const createdAt = Date.now()
+    this.db.prepare(`
+      INSERT INTO gateway_accounts (
+        id, email, name, password_hash, tailscale_user, tailscale_tailnet, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+    `).run(
+      id,
+      account.email,
+      account.name,
+      passwordHash,
+      account.identity.user,
+      account.identity.tailnet,
+      createdAt,
+    )
+    return {
+      ...account,
+      id,
+      status: 'pending',
+      createdAt,
+    }
+  }
+
+  getByEmail(email: string): (GatewayAccount & { passwordHash: string }) | undefined {
+    const row = this.db.prepare(
+      'SELECT * FROM gateway_accounts WHERE email = ?',
+    ).get(email) as GatewayAccountRow | undefined
+    if (!row) return undefined
+    return { ...this.rowToAccount(row), passwordHash: row.password_hash }
+  }
+
+  getApprovedForIdentity(identity: GatewayAccount['identity']): GatewayAccount | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM gateway_accounts
+      WHERE tailscale_user = ? COLLATE NOCASE
+        AND tailscale_tailnet = ? COLLATE NOCASE
+        AND status = 'approved'
+    `).get(identity.user, identity.tailnet) as GatewayAccountRow | undefined
+    return row ? this.rowToAccount(row) : undefined
+  }
+
+  getByIdentity(identity: GatewayAccount['identity']): GatewayAccount | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM gateway_accounts
+      WHERE tailscale_user = ? COLLATE NOCASE AND tailscale_tailnet = ? COLLATE NOCASE
+    `).get(identity.user, identity.tailnet) as GatewayAccountRow | undefined
+    return row ? this.rowToAccount(row) : undefined
+  }
+
+  getPending(): GatewayAccount[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM gateway_accounts WHERE status = 'pending' ORDER BY created_at
+    `).all() as GatewayAccountRow[]
+    return rows.map(row => this.rowToAccount(row))
+  }
+
+  getAll(): GatewayAccount[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM gateway_accounts ORDER BY created_at
+    `).all() as GatewayAccountRow[]
+    return rows.map(row => this.rowToAccount(row))
+  }
+
+  approve(id: string): GatewayAccount | undefined {
+    this.db.prepare(`
+      UPDATE gateway_accounts SET status = 'approved', approved_at = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(Date.now(), id)
+    const row = this.db.prepare(
+      'SELECT * FROM gateway_accounts WHERE id = ?',
+    ).get(id) as GatewayAccountRow | undefined
+    return row ? this.rowToAccount(row) : undefined
+  }
+
+  revoke(id: string): boolean {
+    return this.db.prepare(`
+      UPDATE gateway_accounts SET status = 'revoked'
+      WHERE id = ? AND status = 'approved'
+    `).run(id).changes > 0
+  }
+
+  getApprovedById(id: string): GatewayAccount | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM gateway_accounts WHERE id = ? AND status = 'approved'
+    `).get(id) as GatewayAccountRow | undefined
+    return row ? this.rowToAccount(row) : undefined
+  }
 }
 
 export class ServerRepository {
@@ -620,6 +747,7 @@ export class RevokedTokenRepository {
 
 export function createRepositories(db: SqliteDatabase) {
   return {
+    accounts: new GatewayAccountRepository(db),
     servers: new ServerRepository(db),
     policy: new PolicyRepository(db),
     activity: new ActivityRepository(db),

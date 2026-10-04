@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Modal } from './Modal'
 import { useNetworkData } from '../data/NetworkData'
+import { useAuth } from '../auth/AuthContext'
+import { isSamePeerGateway } from '@shared/peer'
 
 /** "Connect to a teammate": register their exposed gateway as a peer. */
 export function ConnectModal({
@@ -11,25 +13,33 @@ export function ConnectModal({
   onClose: () => void
 }): React.JSX.Element {
   const { available, servers, addPeer, probePeer, removePeer } = useNetworkData()
-  const [address, setAddress] = useState('')
+  const { user, mode } = useAuth()
+  const [address, setAddress] = useState(user?.hostAddress ?? '')
   const [busy, setBusy] = useState<null | 'test' | 'connect'>(null)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
   const peers = useMemo(() => servers.filter((s) => s.transport === 'streamable-http'), [servers])
 
-  const run = async (mode: 'test' | 'connect'): Promise<void> => {
-    setBusy(mode)
+  const run = async (action: 'test' | 'connect'): Promise<void> => {
+    setBusy(action)
     setError(null)
     setOk(null)
     try {
-      const result = mode === 'test' ? await probePeer(address) : await addPeer(address)
+      const accountId = mode === 'client' ? user?.accountId : undefined
+      if (mode === 'client' && !accountId) throw new Error('Sign in to the host gateway before connecting.')
+      if (mode === 'client' && !isSamePeerGateway(address, user?.hostAddress ?? '')) {
+        throw new Error('Sign in to this gateway address before connecting.')
+      }
+      const result = action === 'test'
+        ? await probePeer(address, accountId)
+        : await addPeer(address, accountId)
       setOk(
-        mode === 'test'
+        action === 'test'
           ? `Reachable — ${result.tools.length} tool(s) available`
           : `Connected — ${result.tools.length} tool(s) from ${result.url}`
       )
-      if (mode === 'connect') setAddress('')
+      if (action === 'connect') setAddress('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -42,7 +52,9 @@ export function ConnectModal({
       open={open}
       onClose={onClose}
       title="Connect to a teammate"
-      subtitle="Add a teammate's exposed gateway so their MCP tools appear in yours."
+      subtitle={mode === 'client'
+        ? 'Connect using your approved gateway account and Tailscale identity.'
+        : "Add a teammate's exposed gateway so their MCP tools appear in yours."}
     >
       {!available ? (
         <p className="text-sm text-ink-muted">Open the desktop app to connect to a peer.</p>

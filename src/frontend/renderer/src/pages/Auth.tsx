@@ -19,20 +19,34 @@ export default function AuthPage(): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [hostAddress, setHostAddress] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  /** Validate the form and begin the mock session. */
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
+  /** Validate credentials and authenticate against the selected gateway. */
+  async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     setError(null)
+    setNotice(null)
+    setBusy(true)
     try {
+      if (mode === 'client' && !hostAddress.trim()) throw new Error('Enter the host gateway address.')
+      let status: 'pending' | 'approved' | 'revoked'
       if (form === 'sign-up') {
         if (password !== confirmPassword) throw new Error('Passwords do not match.')
-        signUp(name, email, password, mode)
+        status = await signUp(name, email, password, mode, mode === 'client' ? hostAddress.trim() : '')
       } else {
-        signIn(email, password, mode)
+        status = await signIn(email, password, mode, mode === 'client' ? hostAddress.trim() : '')
+      }
+      if (status === 'pending') {
+        setNotice('Your account is waiting for approval from the gateway host. Once approved, log in again.')
+      } else if (status === 'revoked') {
+        setError('This account has been revoked by the gateway host.')
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -49,9 +63,9 @@ export default function AuthPage(): React.JSX.Element {
             </p>
           </div>
           <div className="mt-10 rounded-xl border border-border bg-surface-raised p-4">
-            <div className="text-label text-ink-muted uppercase">Demo authentication</div>
+            <div className="text-label text-ink-muted uppercase">Gateway accounts</div>
             <p className="mt-2 text-body-small text-ink">
-              This temporary sign-in is only for the app interface. The gateway still uses Tailscale identity and its server-side policy.
+              Accounts are stored by each gateway and linked to the verified Tailscale identity. New client accounts require host approval.
             </p>
           </div>
         </section>
@@ -76,10 +90,27 @@ export default function AuthPage(): React.JSX.Element {
 
           <h2 className="text-h2 text-ink-heading">{form === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
           <p className="mt-1 text-body-small text-ink">
-            {form === 'sign-in' ? 'Log in to continue to your workspace.' : 'Your demo account lasts until the app reloads.'}
+            {mode === 'client'
+              ? 'Sign in to a gateway hosted by a teammate.'
+              : form === 'sign-in'
+                ? 'Log in to this gateway.'
+                : 'Create the host account for this gateway.'}
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
+            {mode === 'client' && (
+              <label className="block text-body-small text-ink-emphasis">
+                Host gateway address
+                <input
+                  autoComplete="url"
+                  className={`${inputClass} mt-1.5`}
+                  value={hostAddress}
+                  onChange={(event) => setHostAddress(event.target.value)}
+                  placeholder="100.64.12.21:8788"
+                  required
+                />
+              </label>
+            )}
             {form === 'sign-up' && (
               <label className="block text-body-small text-ink-emphasis">
                 Name
@@ -153,10 +184,12 @@ export default function AuthPage(): React.JSX.Element {
             </fieldset>
 
             {error && <p role="alert" className="rounded-lg border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-body-small text-status-blocked">{error}</p>}
-            <button type="submit" className={buttonClass}>
-              {form === 'sign-in' ? 'Log in' : 'Create account'}
+            <button type="submit" disabled={busy} className={`${buttonClass} disabled:opacity-60`}>
+              {busy ? 'Connecting…' : form === 'sign-in' ? 'Log in' : 'Create account'}
             </button>
           </form>
+
+          {notice && <p role="status" className="mt-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-body-small text-ink-emphasis">{notice}</p>}
 
           {import.meta.env.DEV && (
             <button
@@ -168,13 +201,13 @@ export default function AuthPage(): React.JSX.Element {
             </button>
           )}
 
-          {form === 'sign-in' && (
+          {import.meta.env.DEV && !window.electronAPI && form === 'sign-in' && (
             <p className="mt-5 rounded-lg bg-surface-muted px-3 py-2 text-caption text-ink">
               Demo account: <span className="font-medium text-ink-emphasis">demo@tether.local</span> / <span className="font-medium text-ink-emphasis">demo1234</span>
             </p>
           )}
           <p className="mt-4 text-caption leading-relaxed text-ink-muted">
-            Demo only: accounts, passwords, and login history are held in memory and are not sent to a database. This does not secure or identify requests to the gateway.
+            Your password is hashed and stored only by the gateway you select. Client access is linked to your Tailscale identity and the gateway host must approve new accounts.
           </p>
         </section>
       </div>

@@ -18,6 +18,7 @@ import { getTestDb, getTestRepos } from './setup.js'
 import { MCPClientManager } from '../../src/backend/gateway/mcp/client.js'
 import { MCPProxyServer } from '../../src/backend/gateway/mcp/server.js'
 import { createAuthManager } from '../../src/backend/gateway/auth/auth.js'
+import { GatewayAccountService } from '../../src/backend/gateway/auth/accounts.js'
 import { PolicyEngine } from '../../src/backend/gateway/authz/policy.js'
 import { TransportType } from '../../src/backend/shared/protocol.js'
 import type { ServerConfig } from '../../src/backend/shared/protocol.js'
@@ -101,6 +102,7 @@ describe('MCP proxy (integration)', () => {
       clientManager,
       policyEngine,
       authManager,
+      accountService: new GatewayAccountService(repos.accounts),
       activityRepo: repos.activity,
       healthRepo: repos.health,
     })

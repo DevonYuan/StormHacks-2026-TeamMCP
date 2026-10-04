@@ -23,6 +23,7 @@ import type {
   TailnetDevicesResponse,
   TailscaleInfo,
 } from '@shared/types'
+import { useAuth } from '../auth/AuthContext'
 import {
   countCallsPerMinute,
   toActivityEvents,
@@ -94,9 +95,9 @@ export interface NetworkData {
   /** Canonical share info for the expose modal. */
   getShare: () => Promise<ShareInfo>
   /** Register a teammate's exposed gateway as a streamable-HTTP upstream. */
-  addPeer: (address: string) => Promise<AddPeerResult>
+  addPeer: (address: string, accountId?: string) => Promise<AddPeerResult>
   /** Validate a peer address without keeping it registered. */
-  probePeer: (address: string) => Promise<AddPeerResult>
+  probePeer: (address: string, accountId?: string) => Promise<AddPeerResult>
   removePeer: (id: string) => Promise<{ success: boolean }>
 }
 
@@ -136,6 +137,7 @@ async function loadSnapshot(): Promise<Snapshot> {
 }
 
 export function NetworkDataProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const { mode, user } = useAuth()
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT)
   const [error, setError] = useState<string | null>(null)
 
@@ -158,6 +160,17 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
   const data = useMemo<NetworkData>(() => {
     const now = Date.now()
     const allServerIds = snapshot.servers.map((c) => c.id)
+    const tailnetDevices = mode === 'client' && user?.tailscaleUser
+      ? {
+          available: snapshot.tailnetDevices.available,
+          self: snapshot.tailnetDevices.self?.user?.toLowerCase() === user.tailscaleUser.toLowerCase()
+            ? snapshot.tailnetDevices.self
+            : null,
+          devices: snapshot.tailnetDevices.devices.filter(
+            (device) => device.user?.toLowerCase() === user.tailscaleUser?.toLowerCase()
+          ),
+        }
+      : snapshot.tailnetDevices
     return {
       available: Boolean(window.electronAPI),
       error,
@@ -165,7 +178,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
       servers: toServers(snapshot.servers, snapshot.health, snapshot.activity, now),
       devices: toDevices(snapshot.activity, snapshot.policy, allServerIds, now),
       machines: toMachines(
-        snapshot.tailnetDevices,
+        tailnetDevices,
         snapshot.status,
         snapshot.activity,
         snapshot.policy,
@@ -196,15 +209,15 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         if (!api) throw new Error('Open the desktop app to expose the gateway')
         return api.share.get()
       },
-      addPeer: async (address: string) => {
+      addPeer: async (address: string, accountId?: string) => {
         const api = window.electronAPI
         if (!api) throw new Error('Open the desktop app to connect to a peer')
-        return api.peers.add(address, false)
+        return api.peers.add(address, false, accountId)
       },
-      probePeer: async (address: string) => {
+      probePeer: async (address: string, accountId?: string) => {
         const api = window.electronAPI
         if (!api) throw new Error('Open the desktop app to test a peer')
-        return api.peers.add(address, true)
+        return api.peers.add(address, true, accountId)
       },
       removePeer: async (id: string) => {
         const api = window.electronAPI
@@ -212,7 +225,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         return api.peers.remove(id)
       },
     }
-  }, [snapshot, error, reload])
+  }, [snapshot, error, reload, mode, user?.tailscaleUser])
 
   return <NetworkDataContext.Provider value={data}>{children}</NetworkDataContext.Provider>
 }
