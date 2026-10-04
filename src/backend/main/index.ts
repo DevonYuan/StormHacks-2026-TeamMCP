@@ -361,6 +361,48 @@ async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const EMPTY_POLICY: PolicyDocument = {
+  version: 1,
+  defaultEffect: "deny",
+  rules: [],
+  updatedAt: 0,
+  updatedBy: "system",
+};
+
+const EMPTY_ACTIVITY_STATS: ActivityStats = {
+  totalRequests: 0,
+  successfulRequests: 0,
+  failedRequests: 0,
+  uniqueUsers: 0,
+  uniqueServers: 0,
+  avgDurationMs: 0,
+  byMethod: {},
+  byServer: {},
+  byTool: {},
+  byIdentity: {},
+  errorsByCode: {},
+};
+
+/** Start the local gateway on demand (for flows that need a running proxy). */
+async function ensureGatewayRunning(): Promise<void> {
+  if (isGatewayRunning) return;
+  await startGateway();
+}
+
+/** Like gatewayFetch, but returns a fallback when no gateway is running/reachable. */
+async function gatewayFetchOr<T>(
+  path: string,
+  fallback: T,
+  init?: RequestInit,
+): Promise<T> {
+  if (!isGatewayRunning) return fallback;
+  try {
+    return await gatewayFetch<T>(path, init);
+  } catch {
+    return fallback;
+  }
+}
+
 // CPU % is the busy share of all core time since the previous call.
 let prevCpus = cpus();
 function hostStats(): HostStats {
@@ -471,7 +513,7 @@ function setupIpcHandlers(): void {
 
   // Server management (proxied to the gateway control API)
   ipcMain.handle(IPC_CHANNELS.SERVERS_GET, async () => {
-    return gatewayFetch<ServerConfig[]>("/api/servers");
+    return gatewayFetchOr<ServerConfig[]>("/api/servers", []);
   });
 
   ipcMain.handle(
@@ -480,6 +522,7 @@ function setupIpcHandlers(): void {
       _event,
       server: Omit<ServerConfig, "id" | "createdAt" | "updatedAt">,
     ) => {
+      await ensureGatewayRunning();
       const created = await gatewayFetch<ServerConfig>("/api/servers", {
         method: "POST",
         body: JSON.stringify(server),
@@ -529,7 +572,7 @@ function setupIpcHandlers(): void {
 
   // Policy management
   ipcMain.handle(IPC_CHANNELS.POLICY_GET, async () => {
-    return gatewayFetch<PolicyDocument>("/api/policy");
+    return gatewayFetchOr<PolicyDocument>("/api/policy", EMPTY_POLICY);
   });
 
   ipcMain.handle(
@@ -591,14 +634,18 @@ function setupIpcHandlers(): void {
           params.set(key, String(value));
         }
       }
-      return gatewayFetch<ActivityEntry[]>(
+      return gatewayFetchOr<ActivityEntry[]>(
         `/api/activity?${params.toString()}`,
+        [],
       );
     },
   );
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_STATS, async () => {
-    return gatewayFetch<ActivityStats>("/api/activity/stats");
+    return gatewayFetchOr<ActivityStats>(
+      "/api/activity/stats",
+      EMPTY_ACTIVITY_STATS,
+    );
   });
 
   ipcMain.handle(
@@ -616,7 +663,7 @@ function setupIpcHandlers(): void {
 
   // Health
   ipcMain.handle(IPC_CHANNELS.HEALTH_GET, async () => {
-    return gatewayFetch<ServerHealth[]>("/api/health");
+    return gatewayFetchOr<ServerHealth[]>("/api/health", []);
   });
 
   // Config
@@ -661,6 +708,9 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.PEERS_ADD,
     async (_event, address: string, probe?: boolean) => {
+      // Registering a peer needs the local gateway (it proxies the peer's tools),
+      // so start it on demand instead of relying on auto-start.
+      await ensureGatewayRunning();
       return gatewayFetch<AddPeerResult>("/api/peers", {
         method: "POST",
         body: JSON.stringify({ address, probe: probe === true }),
@@ -669,6 +719,7 @@ function setupIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.PEERS_REMOVE, async (_event, id: string) => {
+    await ensureGatewayRunning();
     return gatewayFetch<{ success: boolean }>(`/api/peers/${id}`, {
       method: "DELETE",
     });

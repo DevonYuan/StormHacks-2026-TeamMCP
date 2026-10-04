@@ -38,7 +38,7 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
   // Auto-start gateway on app launch
-  autoStartGateway: z.boolean().default(true),
+  autoStartGateway: z.boolean().default(false),
   // Check for updates
   checkUpdates: z.boolean().default(true),
 })
