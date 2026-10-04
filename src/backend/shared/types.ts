@@ -55,6 +55,26 @@ export interface Device {
   traffic: number[]
 }
 
+/** Status shown for a row on the Machines page. */
+export type MachineStatus = 'connected' | 'offline' | 'denied'
+
+/** A machine row: this host or a tailnet peer, merged with gateway activity. */
+export interface Machine {
+  id: string
+  name: string
+  /** Secondary line, e.g. `user@tailnet`. */
+  subtitle: string
+  /** Tailnet IP, or `—` when only activity is known. */
+  ip: string
+  /** Tailnet stable id (peers) or `host:port` (this machine). */
+  gatewayId: string
+  status: MachineStatus
+  /** Short tag shown next to the name, e.g. `Local`, `Peer`, or a tailnet tag. */
+  badge: string
+  /** Last activity / LastSeen in ms, 0 when unknown. */
+  lastSeenMs: number
+}
+
 export interface ActivityEvent {
   id: string
   at: string
@@ -83,6 +103,29 @@ export interface TailscaleInfo {
   ip: string | null
   hostname: string | null
   dnsName: string | null
+}
+
+/** A node on the tailnet (this machine or a peer), from `tailscale status --json`. */
+export interface TailnetDevice {
+  id: string
+  stableId: string | null
+  hostname: string
+  dnsName: string
+  ips: string[]
+  online: boolean
+  lastSeen: string | null
+  os: string | null
+  tags: string[]
+  user: string | null
+  /** True for this machine (Tailscale `Self`). */
+  self: boolean
+}
+
+/** Response for `GET /api/tailscale/devices` (also `tailscale:devices` IPC). */
+export interface TailnetDevicesResponse {
+  available: boolean
+  self: TailnetDevice | null
+  devices: TailnetDevice[]
 }
 
 /** Canonical "what to share" info for exposing this gateway (`/api/share`). */

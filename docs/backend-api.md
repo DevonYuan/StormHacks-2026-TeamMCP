@@ -400,6 +400,86 @@ Delete activity entries older than a timestamp.
 
 ---
 
+### `GET /api/tailscale`
+
+This machine's tailnet identity (used by the status bar / expose flow).
+
+**Response (200):**
+
+```json
+{
+  "available": true,
+  "ip": "100.100.1.1",
+  "hostname": "devon-mac",
+  "dnsName": "devon-mac.tailc60ff3.ts.net."
+}
+```
+
+When Tailscale is not detected, `available` is `false` and the other fields are `null`.
+
+---
+
+### `GET /api/tailscale/devices`
+
+Enumerate every node on the tailnet (Tailscale `Self` + `Peer`) — the source for the
+**Machines** page. Wraps `tailscale status --json`.
+
+**Response (200):**
+
+```json
+{
+  "available": true,
+  "self": {
+    "id": "nHHPhTt9Zd11CNTRL",
+    "stableId": "abc123",
+    "hostname": "devon-mac",
+    "dnsName": "devon-mac.tailc60ff3.ts.net.",
+    "ips": ["100.100.1.1"],
+    "online": true,
+    "lastSeen": null,
+    "os": "macOS",
+    "tags": [],
+    "user": "devon@example.com",
+    "self": true
+  },
+  "devices": [
+    {
+      "id": "ndmsqkiV4g11CNTRL",
+      "stableId": null,
+      "hostname": "icamefromwindows",
+      "dnsName": "icamefromwindows.tailc60ff3.ts.net.",
+      "ips": ["100.102.115.12"],
+      "online": false,
+      "lastSeen": "2026-10-04T04:38:24.1Z",
+      "os": "linux",
+      "tags": ["dev"],
+      "user": "mahesh@example.com",
+      "self": false
+    }
+  ]
+}
+```
+
+Degrades to `{ "available": false, "self": null, "devices": [] }` when Tailscale is
+unavailable or `status` fails, so the UI can fall back to activity-only data.
+
+> Note: online nodes report a zero `LastSeen` (`0001-01-01T00:00:00Z`). Consumers should
+> treat a non-positive parsed timestamp as "unknown".
+
+---
+
+### `GET /api/tailscale/whois?ip=<ip>`
+
+Resolve a single tailnet IP to its node (`tailscale whois --json <ip>`). Returns the raw
+`whois` document (its `Node` block). `400` when `ip` is missing; `502` when the lookup
+fails (e.g. `peer not found`).
+
+> Previously this path was swallowed by the `/api/tailscale` prefix handler and returned
+> local node info; the gateway now routes `devices` and `whois` sub-paths explicitly.
+
+
+---
+
 ### `GET /api/health`
 
 Health status for **each registered MCP server**. Uses `resolveHealthStatus`:

@@ -17,7 +17,7 @@ import type {
   GatewayStatus,
   GatewayConfig,
 } from '../../backend/shared/index.js'
-import type { AddPeerResult, HostStats, ShareInfo } from '../../backend/shared/types.js'
+import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from '../../backend/shared/types.js'
 
 // Type-safe IPC channel definitions
 type IpcChannels =
@@ -44,6 +44,7 @@ type IpcChannels =
   | 'config:update'
   | 'tailscale:status'
   | 'tailscale:whois'
+  | 'tailscale:devices'
   | 'event:activity'
   | 'event:serverHealth'
   | 'event:gatewayStatus'
@@ -164,6 +165,7 @@ const api = {
       'tailscale:status'
     ),
     whois: (ip: string) => invoke<[string], unknown>('tailscale:whois', ip),
+    getDevices: () => invoke<[], TailnetDevicesResponse>('tailscale:devices'),
   },
 
   // Utility

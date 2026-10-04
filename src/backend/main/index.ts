@@ -32,7 +32,7 @@ import {
   ServerHealth,
   GatewayStatus,
 } from "../shared/activity.js";
-import type { AddPeerResult, HostStats, ShareInfo } from "../shared/types.js";
+import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from "../shared/types.js";
 import pino from "pino";
 
 const logger = pino({ name: "main" });
@@ -89,6 +89,7 @@ const IPC_CHANNELS = {
   // Tailscale
   TAILSCALE_STATUS: "tailscale:status",
   TAILSCALE_WHOIS: "tailscale:whois",
+  TAILSCALE_DEVICES: "tailscale:devices",
 
   // Share / peers
   SHARE_GET: "share:get",
@@ -785,6 +786,13 @@ function setupIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.TAILSCALE_WHOIS, async (_event, ip: string) => {
     return gatewayFetch(`/api/tailscale/whois?ip=${encodeURIComponent(ip)}`);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TAILSCALE_DEVICES, async () => {
+    if (!isGatewayRunning) {
+      return { available: false, self: null, devices: [] };
+    }
+    return gatewayFetch<TailnetDevicesResponse>("/api/tailscale/devices");
   });
 
   // Share + peers

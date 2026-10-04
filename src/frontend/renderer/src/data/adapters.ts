@@ -11,7 +11,11 @@ import type {
   Device,
   GatewayMetrics,
   Host,
+  Machine,
+  MachineStatus,
   Server,
+  TailnetDevice,
+  TailnetDevicesResponse,
   TailscaleInfo,
 } from '@shared/types'
 
@@ -199,6 +203,142 @@ export function toDevices(
       Number(b.status === 'online') - Number(a.status === 'online') || a.name.localeCompare(b.name)
   )
   return devices
+}
+
+/** The loopback identity the gateway assigns to local development calls. */
+const LOCAL_USER = 'local@dev'
+const LOCAL_DEVICE_IDS = new Set(['local-dev-device'])
+
+const MACHINE_STATUS_RANK: Record<MachineStatus, number> = {
+  connected: 0,
+  denied: 1,
+  offline: 2,
+}
+
+/** Build a policy identity from a tailnet node so we can resolve its access. */
+function tailnetIdentity(node: TailnetDevice): Identity {
+  return {
+    user: node.user ?? '',
+    device: node.dnsName.replace(/\.$/, '') || node.hostname,
+    deviceId: node.id,
+    tailnet: node.user?.split('@')[1] ?? '',
+  }
+}
+
+/** Tailscale reports a zero time (year 1) for online peers — treat that as unknown. */
+function parseLastSeen(value: string | null): number {
+  if (!value) return 0
+  const ts = Date.parse(value)
+  return Number.isFinite(ts) && ts > 0 ? ts : 0
+}
+
+function machineStatus(
+  identity: Identity,
+  entry: ActivityEntry | undefined,
+  online: boolean,
+  policy: PolicyDocument,
+  allServerIds: string[],
+  now: number
+): MachineStatus {
+  if (entry?.errorCode === 403) return 'denied'
+  const allowed = accessibleServers(policy, identity, allServerIds)
+  if (allServerIds.length > 0 && allowed.length === 0) return 'denied'
+  if (online) return 'connected'
+  if (entry && now - entry.timestamp <= ONLINE_WINDOW_MS) return 'connected'
+  return 'offline'
+}
+
+/**
+ * Merge the tailnet node list with gateway activity into the Machines view model.
+ * Tailnet nodes supply name / IP / online; activity supplies policy status + recency.
+ * Identities that only appear in the activity log are still listed (with `—` IP).
+ */
+export function toMachines(
+  tailnet: TailnetDevicesResponse,
+  status: GatewayStatus | null,
+  entries: ActivityEntry[],
+  policy: PolicyDocument,
+  allServerIds: string[],
+  now = Date.now()
+): Machine[] {
+  const latest = new Map<string, ActivityEntry>()
+  for (const entry of entries) {
+    const key = identityKey(entry.identity)
+    const prev = latest.get(key)
+    if (!prev || entry.timestamp > prev.timestamp) latest.set(key, entry)
+  }
+
+  const machines: Machine[] = []
+  const claimed = new Set<string>()
+
+  const nodes = [...(tailnet.self ? [tailnet.self] : []), ...tailnet.devices]
+  for (const node of nodes) {
+    const identity = tailnetIdentity(node)
+    const host = node.dnsName.replace(/\.$/, '')
+    const entry = latest.get(node.id) ?? latest.get(host) ?? latest.get(node.hostname)
+    for (const key of [identityKey(identity), node.id, host, node.hostname]) {
+      if (key) claimed.add(key)
+    }
+
+    const online = node.self ? Boolean(status?.running) : node.online
+    const gatewayId =
+      node.self && status ? `${status.boundAddress}:${status.port}` : node.stableId ?? node.id ?? ''
+    const tailnetName = node.user?.split('@')[1]
+
+    machines.push({
+      id: `tailnet:${node.id}`,
+      name: node.hostname,
+      subtitle: [node.user, tailnetName].filter(Boolean).join(' · ') || 'Peer',
+      ip: node.ips[0] ?? (node.self ? status?.boundAddress ?? '—' : '—'),
+      gatewayId: gatewayId || '—',
+      status: machineStatus(identity, entry, online, policy, allServerIds, now),
+      badge: node.self ? 'Local' : node.tags[0] ?? 'Peer',
+      lastSeenMs: entry?.timestamp ?? parseLastSeen(node.lastSeen),
+    })
+  }
+
+  // A gateway with no tailnet Self (Tailscale down) still lists the local host.
+  if (!tailnet.self && status?.running) {
+    machines.push({
+      id: 'local-gateway',
+      name: 'This machine',
+      subtitle: `${status.boundAddress}:${status.port}`,
+      ip: status.boundAddress,
+      gatewayId: `${status.boundAddress}:${status.port}`,
+      status: 'connected',
+      badge: 'Local',
+      lastSeenMs: 0,
+    })
+  }
+
+  // Identities seen only in the activity log (no matching tailnet node).
+  const selfHostname = tailnet.self?.hostname
+  for (const [key, entry] of latest) {
+    if (claimed.has(key)) continue
+    const identity = entry.identity
+    const isLocal = LOCAL_DEVICE_IDS.has(identity.deviceId) || identity.user === LOCAL_USER
+    if (tailnet.self && isLocal) continue
+    const name = identity.device || identity.user || 'Unknown device'
+    if (selfHostname && name === selfHostname) continue
+
+    machines.push({
+      id: `activity:${key}`,
+      name,
+      subtitle: [identity.user, identity.tailnet].filter(Boolean).join(' · ') || 'Peer',
+      ip: '—',
+      gatewayId: identity.deviceId || '—',
+      status: machineStatus(identity, entry, false, policy, allServerIds, now),
+      badge: isLocal ? 'Local' : 'Peer',
+      lastSeenMs: entry.timestamp,
+    })
+  }
+
+  machines.sort(
+    (a, b) =>
+      MACHINE_STATUS_RANK[a.status] - MACHINE_STATUS_RANK[b.status] ||
+      a.name.localeCompare(b.name, undefined, { numeric: true })
+  )
+  return machines
 }
 
 export function toHost(

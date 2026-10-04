@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { GatewayConfig } from '../../shared/config.js'
 import { Identity } from '../../shared/policy.js'
+import type { TailnetDevice } from '../../shared/types.js'
 
 interface TailscaleUser {
   ID: number
@@ -26,6 +27,7 @@ interface TailscaleNodeInfo {
   Tags?: string[]
   Online?: boolean
   LastSeen?: string
+  OS?: string
 }
 
 interface TailscaleStatus {
@@ -149,6 +151,36 @@ export async function getLocalTailnetInfo(config: GatewayConfig): Promise<{ ip: 
   } catch {
     return null
   }
+}
+
+/**
+ * Enumerate this machine plus every peer from `tailscale status --json`.
+ * The local machine (`Self`) is returned first with `self: true`.
+ */
+export async function getTailnetDevices(config: GatewayConfig): Promise<TailnetDevice[]> {
+  const status = await getTailscaleStatus(config)
+
+  const userOf = (node: TailscaleNodeInfo): string | null => {
+    if (node.UserID == null) return null
+    return status.User?.[String(node.UserID)]?.LoginName ?? null
+  }
+
+  const toDevice = (node: TailscaleNodeInfo, self: boolean): TailnetDevice => ({
+    id: String(node.ID ?? node.StableID ?? node.HostName ?? ''),
+    stableId: node.StableID ?? null,
+    hostname: node.HostName || (node.DNSName ?? '').replace(/\.$/, '') || 'unknown',
+    dnsName: node.DNSName ?? '',
+    ips: node.TailscaleIPs ?? [],
+    online: self ? true : Boolean(node.Online),
+    lastSeen: node.LastSeen ?? null,
+    os: node.OS ?? null,
+    tags: node.Tags ?? [],
+    user: userOf(node),
+    self,
+  })
+
+  const peers = Object.values(status.Peer ?? {}).map(node => toDevice(node, false))
+  return [toDevice(status.Self, true), ...peers]
 }
 
 export function isTailscaleAvailable(config: GatewayConfig): Promise<boolean> {
