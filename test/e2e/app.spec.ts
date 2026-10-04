@@ -18,8 +18,8 @@ test.describe('Team MCP Gateway App', () => {
 
   test('should navigate to Machines and Settings', async ({ page }) => {
     await page.getByRole('button', { name: /Machines/ }).click()
-    await expect(page.getByText('Machines is coming next.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Machines' })).toBeVisible()
     await page.getByRole('button', { name: /Settings/ }).click()
-    await expect(page.getByText('Settings is coming next.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   })
 })

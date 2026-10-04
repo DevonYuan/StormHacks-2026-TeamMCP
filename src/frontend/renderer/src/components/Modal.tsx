@@ -34,16 +34,16 @@ export function Modal({
       aria-label={title}
     >
       <div className="absolute inset-0 bg-ink/25 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-2xl border border-line bg-card p-5 shadow-[0_24px_60px_-24px_rgb(17_17_17/0.45)]">
+      <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-[0_24px_60px_-24px_rgb(17_17_17/0.45)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-ink">{title}</h2>
-            {subtitle && <p className="mt-1 text-xs text-muted">{subtitle}</p>}
+            {subtitle && <p className="mt-1 text-xs text-ink-muted">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="rounded-md p-1 text-muted hover:bg-black/[0.05] hover:text-ink"
+            className="rounded-md p-1 text-ink-muted hover:bg-surface-muted hover:text-ink-emphasis"
           >
             <svg
               viewBox="0 0 16 16"

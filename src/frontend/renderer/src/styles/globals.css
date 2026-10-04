@@ -1,0 +1,313 @@
+@import "tailwindcss";
+@config "../../../../../tailwind.config.ts";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * ============================================================================
+ * Design tokens — single source of truth
+ * ----------------------------------------------------------------------------
+ * Two themes, toggled by the `dark` class on <html>:
+ *   - Light (default): the original Team MCP warm-neutral palette.
+ *   - Dark: based on Variant "CORE.OS Fleet Manager"
+ *     https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
+ * Components only reference semantic tokens (section 2), so they restyle
+ * automatically when the theme changes.
+ *
+ * One raw value per colour — no 100…950 shade ranges. Lighter/darker steps
+ * are the raw colour blended over the theme's canvas at a percentage
+ * (opacity), via color-mix(). Blends are opaque, so stacked layers never
+ * show through each other.
+ *
+ * Raw palette: HSL channels ("H S% L%"), wrapped as hsl(var(--mcp-x)).
+ * Semantic tokens: complete colours. Tailwind opacity modifiers
+ * (e.g. bg-brand/50) still work on them.
+ *
+ * TEAM RULE: never hardcode a hex, rgb(), or inline style colour. Add a token
+ * here and a named class in tailwind.config.ts instead.
+ * ============================================================================
+ */
+:root {
+  color-scheme: light;
+
+  /* ------------------------------------------------------------------------
+   * 1. Raw palette — design colour name -> HSL of the source hex.
+   *    These are the only place the literal design values live.
+   * ---------------------------------------------------------------------- */
+  /* Light theme */
+  --mcp-paper: 45 20% 96%; /* #F7F6F3 — light canvas */
+  --mcp-ink: 0 0% 7%; /* #111111 — light neutral, blended over paper */
+  --mcp-denim: 225 26% 33%; /* #3F4A6B */
+  --mcp-orange: 19 80% 54%; /* #E8692C */
+  --mcp-cream: 33 60% 97%; /* #FCF8F3 — sidebar, matches the logo background */
+  --mcp-ivory: 36 100% 99%; /* #FFFDFA — app canvas, a step lighter than the sidebar */
+
+  /* Dark theme */
+  --mcp-night: 224 71% 4%; /* #030712 — dark canvas */
+  --mcp-slate: 214 32% 91%; /* #E2E8F0 — dark neutral, blended over night */
+  --mcp-blue: 216.6 71.1% 82.4%; /* #B2CBF2 — brand */
+  --mcp-cyan: 188 86% 53%; /* #22D3EE */
+
+  /* Shared */
+  --mcp-white: 0 0% 100%; /* #FFFFFF */
+  --mcp-emerald: 158 64% 52%; /* #34D399 */
+  --mcp-amber: 43 96% 56%; /* #FBBF24 */
+  --mcp-rose: 350 89% 60%; /* #F43F5E */
+
+  /* ------------------------------------------------------------------------
+   * 2. Semantic tokens (light theme) — what the app/components reference.
+   *    `.dark` below overrides them. Percentages are the share of the raw
+   *    colour blended over the canvas.
+   * ---------------------------------------------------------------------- */
+  --color-brand: hsl(var(--mcp-orange)); /* primary buttons, logo tile */
+  --color-brand-hover: hsl(var(--mcp-orange)); /* hover, focus ring */
+  --color-brand-text: hsl(var(--mcp-orange)); /* active nav icon, accent text */
+  --color-brand-light: hsl(var(--mcp-orange)); /* request pulses in the tree */
+  --color-brand-subtle: color-mix(in srgb, hsl(var(--mcp-ink)) 3.5%, hsl(var(--mcp-paper))); /* tinted panels */
+  --color-brand-secondary: hsl(var(--mcp-orange)); /* host card status dot */
+  --color-on-brand: hsl(var(--mcp-white)); /* text/icons on brand and host surfaces */
+  --color-host: hsl(var(--mcp-ink)); /* host card in the network tree */
+  --color-shadow: hsl(var(--mcp-ink)); /* tint for elevated shadows */
+
+  /* Device / MCP server state — names match DeviceStatus in @shared/types */
+  --color-status-online: hsl(var(--mcp-denim));
+  --color-status-offline: color-mix(in srgb, hsl(var(--mcp-ink)) 28%, hsl(var(--mcp-paper))); /* also stopped servers, idle sparklines */
+  --color-status-blocked: hsl(var(--mcp-orange)); /* blocked devices, denied calls */
+  --color-status-degraded: hsl(var(--mcp-amber));
+  --color-success: hsl(var(--mcp-emerald)); /* positive trends (+4%) */
+
+  --color-surface: hsl(var(--mcp-ivory)); /* app background, status bar */
+  --color-surface-sidebar: hsl(var(--mcp-cream));
+  --color-surface-raised: hsl(var(--mcp-white)); /* cards */
+  --color-surface-muted: color-mix(in srgb, hsl(var(--mcp-ink)) 5%, hsl(var(--mcp-paper))); /* hover, neutral badges */
+
+  --color-border: color-mix(in srgb, hsl(var(--mcp-ink)) 7%, hsl(var(--mcp-paper)));
+  --color-border-strong: color-mix(in srgb, hsl(var(--mcp-ink)) 28%, hsl(var(--mcp-paper)));
+
+  --color-ink-heading: hsl(var(--mcp-ink)); /* page titles, stat values */
+  --color-ink-emphasis: hsl(var(--mcp-ink)); /* primary text */
+  --color-ink: color-mix(in srgb, hsl(var(--mcp-ink)) 61%, hsl(var(--mcp-paper))); /* secondary text */
+  --color-ink-muted: color-mix(in srgb, hsl(var(--mcp-ink)) 28%, hsl(var(--mcp-paper))); /* hints, section headers */
+  --color-ink-subtle: color-mix(in srgb, hsl(var(--mcp-ink)) 28%, hsl(var(--mcp-paper))); /* disabled */
+
+  /* Theme-dependent treatment for the glass-card and sidebar-active utilities. */
+  --glass-opacity: 100%;
+  --glass-border-opacity: 100%;
+  --nav-active-bg: var(--color-surface-raised);
+  --nav-active-bg-opacity: 100%;
+  --nav-active-bg-opacity-end: 100%;
+  --nav-active-fg: var(--color-ink-emphasis);
+  --nav-active-bar-opacity: 0%;
+  --nav-active-shadow: 0 1px 2px color-mix(in srgb, var(--color-shadow) 5%, transparent);
+
+  /* ------------------------------------------------------------------------
+   * 3. Typography — family stacks consumed by tailwind.config.ts.
+   *    The whole UI is monospace. These are OS-installed fonts (Consolas on
+   *    Windows, Menlo/Monaco on macOS), so nothing is bundled.
+   * ---------------------------------------------------------------------- */
+  --font-mono: Consolas, Menlo, Monaco, "Courier New", monospace;
+  --font-body: var(--font-mono);
+  --font-heading: var(--font-mono);
+
+  /* ------------------------------------------------------------------------
+   * 4. Radius & layout.
+   * ---------------------------------------------------------------------- */
+  --radius: 0.75rem; /* 12px — buttons, inputs; cards use radius + 4px */
+  --titlebar-height: 2.5rem;
+  --header-height: 4rem; /* 64px */
+  --statusbar-height: 2rem; /* 32px */
+  --sidebar-width: 16rem; /* 256px */
+  --content-max-width: 90rem; /* 1440px */
+
+  /* ------------------------------------------------------------------------
+   * 5. shadcn/ui contract — every value points at a token above, so any
+   *    shadcn component inherits the palette automatically and we never set
+   *    a standalone colour here.
+   * ---------------------------------------------------------------------- */
+  --background: var(--color-surface);
+  --foreground: var(--color-ink-emphasis);
+
+  --card: var(--color-surface-raised);
+  --card-foreground: var(--color-ink-emphasis);
+
+  --popover: var(--color-surface-raised);
+  --popover-foreground: var(--color-ink-emphasis);
+
+  --primary: var(--color-brand);
+  --primary-foreground: var(--color-on-brand);
+
+  --secondary: var(--color-surface-raised);
+  --secondary-foreground: var(--color-ink-emphasis);
+
+  --muted: var(--color-surface-muted);
+  --muted-foreground: var(--color-ink-muted);
+
+  --accent: var(--color-surface-muted);
+  --accent-foreground: var(--color-ink-heading);
+
+  --destructive: var(--color-status-blocked);
+  --destructive-foreground: hsl(var(--mcp-white));
+
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-brand-hover);
+}
+
+/*
+ * Dark theme. Only semantic tokens change; the shadcn contract above follows
+ * automatically. Neutrals are slate blended over night.
+ */
+.dark {
+  color-scheme: dark;
+
+  --color-brand: hsl(var(--mcp-blue)); /* primary buttons, logo tile */
+  --color-brand-hover: color-mix(in srgb, hsl(var(--mcp-blue)) 85%, hsl(var(--mcp-night))); /* hover, active nav bar */
+  --color-brand-text: hsl(var(--mcp-blue)); /* eyebrows, badges, links on dark */
+  --color-brand-light: hsl(var(--mcp-blue)); /* active nav text, request pulses */
+  --color-brand-subtle: color-mix(in srgb, hsl(var(--mcp-blue)) 20%, hsl(var(--mcp-night))); /* tinted panels */
+  --color-brand-secondary: hsl(var(--mcp-cyan)); /* gradient partner, IPs */
+  --color-on-brand: hsl(var(--mcp-night)); /* the brand blue is light, so text on it is dark */
+  --color-host: hsl(var(--mcp-blue));
+  --color-shadow: hsl(var(--mcp-blue));
+
+  --color-status-online: hsl(var(--mcp-cyan));
+  --color-status-offline: color-mix(in srgb, hsl(var(--mcp-slate)) 26%, hsl(var(--mcp-night)));
+  --color-status-blocked: hsl(var(--mcp-rose));
+  --color-status-degraded: hsl(var(--mcp-amber));
+  --color-success: hsl(var(--mcp-emerald));
+
+  --color-surface: hsl(var(--mcp-night));
+  --color-surface-sidebar: color-mix(in srgb, hsl(var(--mcp-slate)) 3%, hsl(var(--mcp-night)));
+  --color-surface-raised: color-mix(in srgb, hsl(var(--mcp-slate)) 8%, hsl(var(--mcp-night)));
+  --color-surface-muted: color-mix(in srgb, hsl(var(--mcp-slate)) 15%, hsl(var(--mcp-night)));
+
+  --color-border: color-mix(in srgb, hsl(var(--mcp-slate)) 15%, hsl(var(--mcp-night)));
+  --color-border-strong: color-mix(in srgb, hsl(var(--mcp-slate)) 26%, hsl(var(--mcp-night)));
+
+  --color-ink-heading: hsl(var(--mcp-white));
+  --color-ink-emphasis: hsl(var(--mcp-slate));
+  --color-ink: color-mix(in srgb, hsl(var(--mcp-slate)) 70%, hsl(var(--mcp-night)));
+  --color-ink-muted: color-mix(in srgb, hsl(var(--mcp-slate)) 48%, hsl(var(--mcp-night)));
+  --color-ink-subtle: color-mix(in srgb, hsl(var(--mcp-slate)) 35%, hsl(var(--mcp-night)));
+
+  --glass-opacity: 60%;
+  --glass-border-opacity: 50%;
+  --nav-active-bg: var(--color-brand-hover);
+  --nav-active-bg-opacity: 15%;
+  --nav-active-bg-opacity-end: 0%;
+  --nav-active-fg: var(--color-brand-light);
+  --nav-active-bar-opacity: 100%;
+  --nav-active-shadow: none;
+}
+
+/*
+ * ============================================================================
+ * Base — desktop-app defaults
+ * ============================================================================
+ */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  /* The window never scrolls as a whole; individual panes do. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    /* Native apps don't let users select UI chrome; opt back in with `select-text`. */
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  pre,
+  code {
+    user-select: text;
+  }
+
+  img,
+  a {
+    -webkit-user-drag: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-muted);
+    border-radius: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-strong);
+  }
+}
+
+/*
+ * ============================================================================
+ * Design utilities — recurring effects from the design that aren't a single
+ * Tailwind class. Defined with @utility so variants (hover:, md:) work.
+ * ============================================================================
+ */
+
+/* Card surface: solid in light, translucent glass in dark. Pair with `rounded-xl` (16px). */
+@utility glass-card {
+  background: color-mix(in srgb, var(--color-surface-raised) var(--glass-opacity), transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, var(--color-border) var(--glass-border-opacity), transparent);
+}
+
+/* Selected sidebar nav item: raised card in light, brand fade + bar in dark. */
+@utility sidebar-active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--nav-active-bg) var(--nav-active-bg-opacity), transparent) 0%,
+    color-mix(in srgb, var(--nav-active-bg) var(--nav-active-bg-opacity-end), transparent) 100%
+  );
+  color: var(--nav-active-fg);
+  border-left: 3px solid color-mix(in srgb, var(--color-brand-hover) var(--nav-active-bar-opacity), transparent);
+  box-shadow: var(--nav-active-shadow);
+}
+
+/* Halo around an online status dot. */
+@utility status-glow-online {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-status-online) 50%, transparent);
+}
+
+/* Dotted canvas behind the network tree. */
+@utility dot-grid {
+  background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/*
+ * ============================================================================
+ * Electron utilities — required for frameless windows
+ * (`frame: false` / `titleBarStyle: "hidden"`). Put `no-drag` on any
+ * interactive element inside a `drag-region`.
+ * ============================================================================
+ */
+@utility drag-region {
+  -webkit-app-region: drag;
+}
+
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
