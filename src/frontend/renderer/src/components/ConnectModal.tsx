@@ -45,11 +45,11 @@ export function ConnectModal({
       subtitle="Add a teammate's exposed gateway so their MCP tools appear in yours."
     >
       {!available ? (
-        <p className="text-sm text-muted">Open the desktop app to connect to a peer.</p>
+        <p className="text-sm text-ink-muted">Open the desktop app to connect to a peer.</p>
       ) : (
         <div className="space-y-4">
           <div>
-            <label className="text-[11px] font-medium tracking-wide text-muted uppercase">
+            <label className="text-[11px] font-medium tracking-wide text-ink-muted uppercase">
               Peer address
             </label>
             <div className="mt-1.5 flex gap-2">
@@ -60,17 +60,17 @@ export function ConnectModal({
                   if (e.key === 'Enter') void run('connect')
                 }}
                 placeholder="100.64.12.21:8788"
-                className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 font-mono text-[12px] text-ink outline-none focus-visible:border-signal"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-2 font-mono text-[12px] text-ink outline-none focus-visible:border-brand"
               />
               <button
                 onClick={() => void run('test')}
                 disabled={!address.trim() || busy !== null}
-                className="rounded-lg border border-line px-3 py-2 text-xs text-muted hover:text-ink disabled:opacity-50"
+                className="rounded-lg border border-border px-3 py-2 text-xs text-ink-muted hover:text-ink disabled:opacity-50"
               >
                 {busy === 'test' ? 'Testing…' : 'Test'}
               </button>
             </div>
-            <p className="mt-1.5 text-[11px] text-muted">
+            <p className="mt-1.5 text-[11px] text-ink-muted">
               A tailnet address like <span className="font-mono">100.64.12.21:8788</span>, or a full URL.
             </p>
           </div>
@@ -78,33 +78,33 @@ export function ConnectModal({
           <button
             onClick={() => void run('connect')}
             disabled={!address.trim() || busy !== null}
-            className="w-full rounded-lg bg-signal px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
           >
             {busy === 'connect' ? 'Connecting…' : 'Connect'}
           </button>
 
-          {error && <p className="text-xs text-signal">{error}</p>}
+          {error && <p className="text-xs text-status-blocked">{error}</p>}
           {ok && <p className="text-xs text-online">{ok}</p>}
 
           {peers.length > 0 && (
-            <div className="border-t border-line pt-3">
-              <div className="text-[11px] font-medium tracking-wide text-muted uppercase">
+            <div className="border-t border-border pt-3">
+              <div className="text-[11px] font-medium tracking-wide text-ink-muted uppercase">
                 Connected peers
               </div>
               <ul className="mt-2 space-y-1.5">
                 {peers.map((p) => (
                   <li
                     key={p.id}
-                    className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-xs"
+                    className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs"
                   >
-                    <span className={`size-1.5 rounded-full ${p.running ? 'bg-online' : 'bg-faint'}`} />
+                    <span className={`size-1.5 rounded-full ${p.running ? 'bg-status-online' : 'bg-status-offline'}`} />
                     <span className="truncate font-mono">{p.name ?? p.id}</span>
-                    <span className="ml-auto shrink-0 text-muted">{p.tools} tools</span>
+                    <span className="ml-auto shrink-0 text-ink-muted">{p.tools} tools</span>
                     <button
                       onClick={() => void removePeer(p.id)}
                       title="Remove peer"
                       aria-label={`Remove ${p.name ?? p.id}`}
-                      className="rounded p-0.5 text-muted hover:text-signal"
+                      className="rounded p-0.5 text-ink-muted hover:text-status-blocked"
                     >
                       ✕
                     </button>
