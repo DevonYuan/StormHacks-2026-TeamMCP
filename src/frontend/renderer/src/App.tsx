@@ -67,7 +67,13 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
   ]
 
   return (
-    <aside className="row-span-2 flex flex-col border-r border-border bg-surface-sidebar px-3 py-5">
+    <aside
+      className={`row-span-2 flex flex-col border-r border-border bg-surface-sidebar px-3 pb-5 ${
+        // On macOS the frameless window draws native traffic lights over the
+        // top-left corner; reserve the title bar height so the logo clears them.
+        isMac ? 'pt-titlebar' : 'pt-5'
+      }`}
+    >
       <div className="flex items-center gap-2 px-2">
         <img src="./logo.png" alt="Tether" className="h-10 w-auto" />
       </div>
