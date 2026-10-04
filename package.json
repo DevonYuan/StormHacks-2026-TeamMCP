@@ -44,6 +44,7 @@
     "concurrently": "^9.0.0",
     "electron-log": "^5.1.0",
     "electron-updater": "^6.3.0",
+    "i": "^0.3.7",
     "pino": "^9.0.0",
     "pino-pretty": "^11.0.0",
     "react": "^18.3.0",
@@ -61,8 +62,8 @@
     "@types/react-dom": "^18.3.0",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "electron-builder": "^25.0.0",
     "electron": "^30.0.0",
+    "electron-builder": "^25.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.35.0",
@@ -114,13 +115,13 @@
         "dmg",
         "zip"
       ],
-      "icon": "docs/icon.png"
+      "icon": "docs/logo.png"
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "docs/icon.png"
+      "icon": "docs/logo.png"
     },
     "linux": {
       "target": [
@@ -128,7 +129,7 @@
         "deb",
         "pacman"
       ],
-      "icon": "docs/icon.png",
+      "icon": "docs/logo.png",
       "category": "Development",
       "maintainer": "Team MCP <mahesh.jograna10@gmail.com>"
     },
