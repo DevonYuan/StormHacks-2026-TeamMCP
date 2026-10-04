@@ -360,7 +360,7 @@ export default function Machines(): React.JSX.Element {
     <div>
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-h4 text-brand-text uppercase">Fleet manager</div>
+          <div className="text-h4 text-brand-text uppercase">manager for</div>
           <h1 className="text-h1 text-ink-heading">Machines</h1>
         </div>
         <div className="flex gap-3">
