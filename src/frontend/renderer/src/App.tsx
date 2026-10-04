@@ -1,8 +1,15 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import Home from './pages/Home'
+import Machines from './pages/Machines'
 import { devices, host, servers } from './mock'
 
-type Page = 'Network' | 'Machines' | 'Settings'
+
+type Page = 
+| 'Network' 
+| 'Machines' 
+| 'MCP Apps'
+| 'Gateway'
+| 'Settings '
 type Theme = 'light' | 'dark'
 
 /** Light by default; the choice persists across launches. */
@@ -60,6 +67,8 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
 const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
   { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
   { page: 'Machines', badge: { text: devices.length, alert: false } },
+  { page: 'Gateway' },
+  { page: 'MCP Apps' },
   { page: 'Settings' }
 ]
 
@@ -236,7 +245,13 @@ function App(): React.JSX.Element {
       <Sidebar page={page} onPage={setPage} />
       <main className="overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
-          {page === 'Network' ? <Home /> : <p className="text-ink">{page} is coming next.</p>}
+          {page === 'Network' ? (
+            <Home />
+          ) : page === 'Machines' ? (
+            <Machines />
+          ) : (
+            <p className="text-ink">{page} is coming next.</p>
+          )}
         </div>
       </main>
       <StatusBar />
