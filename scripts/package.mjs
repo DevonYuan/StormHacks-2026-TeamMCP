@@ -2,7 +2,7 @@
 /**
  * Build and package the app as an installer for the host OS (or an explicit target).
  *
- *   npm run package              auto-detect: macOS → dmg+zip, Linux → AppImage+deb, Windows → nsis
+ *   npm run package              auto-detect: macOS → dmg+zip, Linux → AppImage+deb+pacman, Windows → nsis
  *   npm run package -- --linux   force Linux (run this ON Linux)
  *   npm run package -- --mac     force macOS (run this ON macOS)
  *   npm run package -- --win     force Windows (run this ON Windows / CI)
@@ -14,7 +14,7 @@
  * teammate runs `npm run package` on Linux and gets the AppImage + .deb.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,8 +23,8 @@ const args = process.argv.slice(2)
 const has = (flag) => args.includes(`--${flag}`)
 
 const OS_TO_TARGET = { darwin: 'mac', win32: 'win', linux: 'linux' }
-const TARGETS = { mac: ['dmg', 'zip'], win: ['nsis'], linux: ['AppImage', 'deb'] }
-const EXTENSIONS = { mac: ['.dmg', '.zip'], win: ['.exe'], linux: ['.AppImage', '.deb'] }
+const TARGETS = { mac: ['dmg', 'zip'], win: ['nsis'], linux: ['AppImage', 'deb', 'pacman'] }
+const EXTENSIONS = { mac: ['.dmg', '.zip'], win: ['.exe'], linux: ['.AppImage', '.deb', '.pacman'] }
 
 if (has('help') || has('h')) {
   console.log(`Usage: npm run package [-- --mac|--win|--linux] [--dir] [--skip-build]
@@ -32,7 +32,7 @@ if (has('help') || has('h')) {
   (no flag)     build + package an installer for the current OS
   --mac         force a macOS installer (dmg + zip)
   --win         force a Windows installer (nsis)
-  --linux       force a Linux installer (AppImage + deb)
+  --linux       force a Linux installer (AppImage + deb + pacman)
   --dir         unpacked app directory only (no installer)
   --skip-build  reuse the existing dist/ instead of rebuilding`)
   process.exit(0)
@@ -73,12 +73,19 @@ if (!has('skip-build')) {
   run('npm', ['run', 'build'])
 }
 
+// fpm appends to an existing .deb instead of replacing it, so clear old installers first.
+const outDir = join(root, 'dist')
+if (existsSync(outDir)) {
+  for (const name of readdirSync(outDir)) {
+    if (EXTENSIONS[target].some((ext) => name.endsWith(ext))) rmSync(join(outDir, name))
+  }
+}
+
 const ebArgs = ['--' + target]
 if (has('dir')) ebArgs.push('--dir')
 else ebArgs.push(...TARGETS[target])
 run(localBin('electron-builder'), ebArgs)
 
-const outDir = join(root, 'dist')
 if (!has('dir') && existsSync(outDir)) {
   const artifacts = readdirSync(outDir).filter((name) =>
     EXTENSIONS[target].some((ext) => name.endsWith(ext)),

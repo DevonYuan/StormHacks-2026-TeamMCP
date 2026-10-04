@@ -113,20 +113,40 @@
         "dmg",
         "zip"
       ],
-      "icon": "docs/logo.png"
+      "icon": "docs/icon.png"
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "docs/logo.png"
+      "icon": "docs/icon.png"
     },
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "pacman"
       ],
-      "icon": "docs/logo.png"
+      "icon": "docs/icon.png",
+      "category": "Development",
+      "maintainer": "Team MCP <mahesh.jograna10@gmail.com>"
+    },
+    "pacman": {
+      "depends": [
+        "c-ares",
+        "ffmpeg",
+        "gtk3",
+        "http-parser",
+        "libevent",
+        "libvpx",
+        "libxslt",
+        "libxss",
+        "minizip",
+        "nss",
+        "re2",
+        "snappy",
+        "libnotify"
+      ]
     },
     "nsis": {
       "oneClick": false,
