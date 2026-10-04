@@ -4,8 +4,8 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
 
-  --color-surface: #f7f6f3;
-  --color-rail: #efede8;
+  --color-surface: #fffdfa;
+  --color-rail: #fcf8f3;
   --color-card: #ffffff;
   --color-line: #e7e5e0;
   --color-ink: #111111;

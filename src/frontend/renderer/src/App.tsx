@@ -60,21 +60,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
 
   return (
     <aside className="row-span-2 flex flex-col border-r border-line bg-rail px-3 py-5">
-      <div className="flex items-center gap-2.5 px-2">
-        <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
-          <rect width="32" height="32" rx="7" className="fill-signal" />
-          <path
-            d="M9 22 L15 10 M17 22 L23 10"
-            className="stroke-white"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        <div className="leading-tight">
-          <div className="text-[15px] font-semibold tracking-tight">Team MCP</div>
-          <div className="text-xs text-muted">Gateway</div>
-        </div>
-      </div>
+      <img src="./logo.png" alt="Tether" className="mx-2 h-10 w-auto self-start" />
 
       <nav className="mt-7 flex flex-col gap-0.5">
         {nav.map(({ page: p, badge }, i) => {
