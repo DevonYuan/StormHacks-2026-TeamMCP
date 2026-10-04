@@ -143,7 +143,6 @@ export async function handlePeersApi(
 
     const body = await readJson(req)
     const address = typeof body.address === 'string' ? body.address : ''
-    const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : ''
     const probe = body.probe === true
 
     let url: string
@@ -161,7 +160,6 @@ export async function handlePeersApi(
       name: `peer:${host}`,
       transport: TransportType.StreamableHttp,
       url,
-      headers: accountId ? { 'x-tether-account-id': accountId } : undefined,
       enabled: true,
       description: 'Remote Team MCP Gateway peer',
     })

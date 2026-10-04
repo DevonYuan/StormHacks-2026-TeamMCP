@@ -5,10 +5,6 @@ export interface AuthUser {
   name: string
   email: string
   createdAt: number
-  accountId?: string
-  tailscaleUser?: string
-  tailnet?: string
-  hostAddress?: string
 }
 
 export interface AuthEvent {
@@ -19,49 +15,51 @@ export interface AuthEvent {
   timestamp: number
 }
 
-interface MockAccount extends AuthUser {
+interface LocalProfile extends AuthUser {
   password: string
 }
 
-/** Provide volatile demo accounts and session events for browser-only development. */
-export class MockAuthStore {
-  private readonly accounts = new Map<string, MockAccount>()
+/** Provide in-memory local profiles and session events; this is not gateway authentication. */
+export class LocalProfileStore {
+  private readonly profiles = new Map<string, LocalProfile>()
   private readonly events: AuthEvent[] = []
   private nextEventId = 1
 
-  constructor() {
-    this.accounts.set('demo@tether.local', {
-      name: 'Demo User',
-      email: 'demo@tether.local',
-      password: 'demo1234',
-      createdAt: Date.now(),
-    })
+  constructor(includeDemo = false) {
+    if (includeDemo) {
+      this.profiles.set('demo@tether.local', {
+        name: 'Demo User',
+        email: 'demo@tether.local',
+        password: 'demo1234',
+        createdAt: Date.now(),
+      })
+    }
   }
 
-  /** Create a session-local account and record the signup event. */
+  /** Create a session-local profile and record the signup event. */
   signUp(name: string, email: string, password: string, mode: AccountMode): AuthUser {
     const cleanName = name.trim()
     const cleanEmail = email.trim().toLowerCase()
     if (!cleanName) throw new Error('Enter your name.')
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) throw new Error('Enter a valid email address.')
     if (password.length < 8) throw new Error('Use a password with at least 8 characters.')
-    if (this.accounts.has(cleanEmail)) throw new Error('An account with this email already exists.')
+    if (this.profiles.has(cleanEmail)) throw new Error('A profile with this email already exists.')
 
-    const user: MockAccount = {
+    const user: LocalProfile = {
       name: cleanName,
       email: cleanEmail,
       password,
       createdAt: Date.now(),
     }
-    this.accounts.set(cleanEmail, user)
+    this.profiles.set(cleanEmail, user)
     this.record('signed-up', user.email, mode)
     return this.publicUser(user)
   }
 
-  /** Verify a session-local account and record the login event. */
+  /** Verify a session-local profile and record the login event. */
   signIn(email: string, password: string, mode: AccountMode): AuthUser {
     const cleanEmail = email.trim().toLowerCase()
-    const account = this.accounts.get(cleanEmail)
+    const account = this.profiles.get(cleanEmail)
     if (!account || account.password !== password) throw new Error('Email or password is incorrect.')
     this.record('signed-in', account.email, mode)
     return this.publicUser(account)
@@ -78,7 +76,7 @@ export class MockAuthStore {
     return user
   }
 
-  /** Record a logout for the active account. */
+  /** Record a logout for the active profile. */
   signOut(user: AuthUser, mode: AccountMode): void {
     this.record('signed-out', user.email, mode)
   }
@@ -94,7 +92,7 @@ export class MockAuthStore {
   }
 
   /** Return public account fields without exposing the stored password. */
-  private publicUser(account: MockAccount): AuthUser {
+  private publicUser(account: LocalProfile): AuthUser {
     const { name, email, createdAt } = account
     return { name, email, createdAt }
   }

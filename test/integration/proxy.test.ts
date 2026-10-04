@@ -18,7 +18,7 @@ import { getTestDb, getTestRepos } from './setup.js'
 import { MCPClientManager } from '../../src/backend/gateway/mcp/client.js'
 import { MCPProxyServer } from '../../src/backend/gateway/mcp/server.js'
 import { createAuthManager } from '../../src/backend/gateway/auth/auth.js'
-import { GatewayAccountService } from '../../src/backend/gateway/auth/accounts.js'
+import { GatewayApprovalService } from '../../src/backend/gateway/auth/approvals.js'
 import { PolicyEngine } from '../../src/backend/gateway/authz/policy.js'
 import { TransportType } from '../../src/backend/shared/protocol.js'
 import type { ServerConfig } from '../../src/backend/shared/protocol.js'
@@ -66,6 +66,7 @@ describe('MCP proxy (integration)', () => {
   let clientManager: MCPClientManager
   let proxyServer: MCPProxyServer
   let policyEngine: PolicyEngine
+  let approvalService: GatewayApprovalService
   let httpServer: HttpServer
   let baseUrl: string
   let fixtureServerId: string
@@ -79,6 +80,7 @@ describe('MCP proxy (integration)', () => {
 
   beforeAll(async () => {
     repos = getTestRepos()
+    approvalService = new GatewayApprovalService(repos.approvals)
 
     const authManager = createAuthManager(TEST_CONFIG, repos.revokedTokens)
     await authManager.initialize()
@@ -102,7 +104,7 @@ describe('MCP proxy (integration)', () => {
       clientManager,
       policyEngine,
       authManager,
-      accountService: new GatewayAccountService(repos.accounts),
+      approvalService,
       activityRepo: repos.activity,
       healthRepo: repos.health,
     })
@@ -232,5 +234,47 @@ describe('MCP proxy (integration)', () => {
 
     const prompts = await client.listPrompts()
     expect(prompts.prompts).toEqual([])
+  })
+
+  it('creates a per-host pending request, admits after approval, and closes sessions on revocation', async () => {
+    const remoteServer = createServer((req, res) => {
+      Object.defineProperty(req.socket, 'remoteAddress', { value: '100.64.0.8' })
+      void proxyServer.handleRequest(req, res)
+    })
+    await new Promise<void>(resolve => remoteServer.listen(0, '127.0.0.1', resolve))
+    const { port } = remoteServer.address() as AddressInfo
+    const url = new URL(`http://127.0.0.1:${port}/mcp`)
+    const firstClient = new Client({ name: 'pending-client', version: '1.0.0' }, { capabilities: {} })
+    const identity = {
+      user: 'testuser@example.com',
+      tailnet: 'example.com',
+    }
+
+    try {
+      const connectionError = await firstClient
+        .connect(new StreamableHTTPClientTransport(url))
+        .then(() => null, error => error as Error)
+      expect(connectionError?.message).toMatch(/waiting for host approval/i)
+      const pending = repos.approvals.getByIdentity(identity)
+      expect(pending?.status).toBe('pending')
+      expect(pending?.tailscaleUser).toBe(identity.user)
+      if (!pending) throw new Error('Expected the gateway to create a pending approval.')
+
+      approvalService.approve(pending.id)
+      const approvedClient = new Client({ name: 'approved-client', version: '1.0.0' }, { capabilities: {} })
+      await approvedClient.connect(new StreamableHTTPClientTransport(url))
+      expect((await approvedClient.listTools()).tools.length).toBeGreaterThan(0)
+
+      approvalService.revoke(pending.id)
+      await proxyServer.revokeApprovalSessions(pending.id)
+      await expect(approvedClient.listTools()).rejects.toThrow()
+      await approvedClient.close().catch(() => undefined)
+    } finally {
+      await firstClient.close().catch(() => undefined)
+      await new Promise<void>(resolve => {
+        remoteServer.close(() => resolve())
+        remoteServer.closeAllConnections()
+      })
+    }
   })
 })

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { MockAuthStore } from '../../src/frontend/renderer/src/auth/mockAuth.js'
+import { LocalProfileStore } from '../../src/frontend/renderer/src/auth/localProfile.js'
 
-describe('MockAuthStore', () => {
+describe('LocalProfileStore', () => {
   it('creates an account, signs in again, and records session events', () => {
-    const store = new MockAuthStore()
+    const store = new LocalProfileStore()
 
     const user = store.signUp(' Test User ', 'TEST@example.com', 'safe-pass-1', 'client')
     expect(user).toMatchObject({ name: 'Test User', email: 'test@example.com' })
@@ -23,12 +23,19 @@ describe('MockAuthStore', () => {
   })
 
   it('provides the documented demo account', () => {
-    const store = new MockAuthStore()
+    const store = new LocalProfileStore(true)
     expect(store.signIn('demo@tether.local', 'demo1234', 'server').name).toBe('Demo User')
   })
 
+  it('does not seed demo credentials outside development mode', () => {
+    const store = new LocalProfileStore()
+    expect(() => store.signIn('demo@tether.local', 'demo1234', 'server')).toThrow(
+      'Email or password is incorrect.',
+    )
+  })
+
   it('creates a development guest without requiring credentials', () => {
-    const store = new MockAuthStore()
+    const store = new LocalProfileStore()
     const guest = store.createGuest('client')
 
     expect(guest).toMatchObject({ name: 'Development User' })
@@ -37,7 +44,7 @@ describe('MockAuthStore', () => {
   })
 
   it('rejects invalid signup details and duplicate emails', () => {
-    const store = new MockAuthStore()
+    const store = new LocalProfileStore()
     expect(() => store.signUp('', 'new@example.com', 'password1', 'server')).toThrow('Enter your name.')
     expect(() => store.signUp('New User', 'invalid', 'password1', 'server')).toThrow('valid email')
     expect(() => store.signUp('New User', 'new@example.com', 'short', 'server')).toThrow('8 characters')
@@ -46,7 +53,7 @@ describe('MockAuthStore', () => {
   })
 
   it('does not reveal whether an account exists on a failed login', () => {
-    const store = new MockAuthStore()
+    const store = new LocalProfileStore(true)
     expect(() => store.signIn('missing@example.com', 'wrong-pass', 'client')).toThrow(
       'Email or password is incorrect.',
     )

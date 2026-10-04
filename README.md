@@ -128,14 +128,14 @@ This is **not** the right choice when you need 24/7 availability, elastic scale,
 | Local transports | **stdio** + **Streamable HTTP** | stdio for spawned local servers; Streamable HTTP for already-running local/remote servers, with SSE fallback for older ones. |
 | Exposed transport | **Streamable HTTP** (MCP-canonical) | The gateway serves one modern endpoint to remote clients, with SSE backward-compatibility where needed. |
 | Networking | **Tailscale** primary, **LAN** for local demo | Tailscale gives NAT traversal, WireGuard encryption, and device identity with zero infrastructure. We consume it — we do not rebuild it. Hostname/address discovered via `tailscale status --json`. |
-| AuthN | **Gateway account + verified Tailscale identity** | Each gateway stores account credentials locally in SQLite (passwords are scrypt-hashed). New client accounts require host approval; later connections must match the same verified Tailscale user and tailnet. |
+| AuthN / access | **Verified Tailscale identity + per-gateway approval** | The host resolves each incoming connection to a Tailscale user. Each gateway separately approves that user; all of their devices on that tailnet share the decision. |
 | AuthZ | **Policy file (declarative) → RBAC** | Identity → allowed servers → allowed tools, stored locally and hot-reloadable. |
-| Persistence | **SQLite (`node:sqlite`)** | Each gateway stores its server registry, policy, health, activity, revoked-token data, and gateway-scoped accounts locally. |
+| Persistence | **SQLite (`node:sqlite`)** | Each gateway stores its server registry, policy, health, activity, revoked-token data, and local Tailscale approval decisions. |
 | Validation / config | **Zod** | Validate policy files, config, and untrusted protocol payloads at the boundary. |
 | Logging | **pino** + SQLite activity store | Structured logs for debugging; a queryable activity log streamed live to the UI. |
 | Testing | **Vitest** (unit) + **Playwright** (Electron E2E) | Fast unit tests for routing/policy; real end-to-end runs through the actual Electron app. |
 
-Signup and login are handled by the selected gateway. The gateway binds each account to the caller's verified Tailscale user and tailnet, stores only a password hash, and requires host approval for remote signups. Approved accounts are checked again when a client opens an MCP session; an account ID by itself is not a credential. Client mode currently keeps one signed-in gateway at a time, and prevents reusing that gateway's account ID with a different host. Development builds also include a **Skip for development** guest session, which is not included in production builds and cannot authenticate to a remote gateway. Account data is local to each gateway and is not synchronized between hosts.
+The app sign-in is a **local UI profile only**; it does not authenticate to gateways and is held in memory for the app session. To access a host, the client adds that host in the Connect flow. On the first connection attempt, the host derives the caller identity from the connection's observed Tailscale source, records a pending request in its own SQLite database, and denies the session until its owner approves it in Settings. After approval, that host accepts all devices for the same Tailscale user and tailnet. Other hosts maintain independent approvals, so the client can connect to multiple gateways without sharing account credentials or account IDs. Development builds also include a **Skip for development** guest profile.
 
 ### Explicitly rejected for the MVP
 
@@ -290,7 +290,7 @@ The gateway listens on `GATEWAY_PORT` (default `8788`).
 | `LOG_LEVEL` | `info` | Set to `debug` for verbose gateway logs |
 | `REDACT_TOOL_PAYLOADS` | `true` | Leave `true` unless actively debugging — setting it to `false` writes tool arguments into the activity log |
 
-`.env` is gitignored; do not put credentials or signing keys in it. Gateway account password hashes are stored in local SQLite. The legacy Ed25519 token helper currently generates an in-memory key and is not used to authenticate MCP sessions, so those tokens are not durable across gateway restarts.
+`.env` is gitignored; do not put credentials or signing keys in it. Gateway access decisions are stored in that gateway's local SQLite database. The legacy Ed25519 token helper currently generates an in-memory key and is not used to authenticate MCP sessions, so those tokens are not durable across gateway restarts.
 
 ### Accounts & services to create
 
@@ -598,7 +598,7 @@ Beyond the documented trade-offs, these are the sharp edges we expect to hit.
 
 - **Confused-deputy risk.** The gateway holds credentials for upstream MCP servers. A bug can let a remote caller act with the host's privileges.
 - **Prompt injection across the boundary.** Remote model output can steer tools that act on host resources. Authorization must be enforced server-side, never inferred from model intent.
-- **Account credential handling.** Passwords are scrypt-hashed; account IDs are identifiers rather than secrets, and every MCP session is also checked against the verified Tailscale identity.
+- **Gateway access control.** Resolve identity from the incoming socket's actual source address; never trust a client-supplied IP or forwarded-IP header. Each MCP session must match the verified Tailscale identity and that gateway's approval.
 - **Logging as a liability.** Activity logs can capture sensitive arguments and file contents. Redaction must be the default, not a setting someone forgets.
 
 ### Platform & distribution

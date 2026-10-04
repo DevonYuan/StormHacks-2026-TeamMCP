@@ -1,8 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Logger } from 'pino'
 import { ZodError } from 'zod'
-import type { AuthManager } from '../auth/auth.js'
-import { handleAccountDevices, handleAccountManagementApi, handlePublicAccountAuth } from './api/accounts.js'
+import { handleApprovalsApi } from './api/approvals.js'
 import { isManagementRequestAllowed } from '../http-access.js'
 import { handleActivityApi, handlePolicyApi } from './api/policy-activity.js'
 import { handlePeersApi, handleShareApi, handleTailscaleApi } from './api/network.js'
@@ -42,20 +41,6 @@ export class GatewayHttpRouter {
 
       if (path === '/health') {
         sendJson(res, 200, { status: 'ok', ...ctx.proxyServer.getStatus() })
-        return
-      }
-
-      if (path === '/auth/token' && req.method === 'POST') {
-        await this.handleTokenExchange(req, res, ctx.authManager)
-        return
-      }
-
-      if (path === '/auth/signup' || path === '/auth/login') {
-        await handlePublicAccountAuth(req, res, path.endsWith('signup') ? 'signup' : 'login', ctx)
-        return
-      }
-      if (path === '/auth/devices') {
-        await handleAccountDevices(req, res, ctx)
         return
       }
 
@@ -110,8 +95,8 @@ export class GatewayHttpRouter {
         return
       case 'servers':
         return handleServersApi(req, res, id, action, ctx)
-      case 'accounts':
-        return handleAccountManagementApi(req, res, id, action, ctx)
+      case 'approvals':
+        return handleApprovalsApi(req, res, id, action, ctx)
       case 'share':
         return handleShareApi(req, res, ctx)
       case 'peers':
@@ -143,18 +128,4 @@ export class GatewayHttpRouter {
     }
   }
 
-  /** Exchange a connecting client's address for an authenticated session result. */
-  private async handleTokenExchange(
-    req: IncomingMessage,
-    res: ServerResponse,
-    authManager: AuthManager,
-  ): Promise<void> {
-    try {
-      const clientIp = req.socket.remoteAddress ?? ''
-      const result = await authManager.authenticateConnection(clientIp)
-      sendJson(res, 200, result)
-    } catch (error: unknown) {
-      sendJson(res, 500, { success: false, error: String(error) })
-    }
-  }
 }

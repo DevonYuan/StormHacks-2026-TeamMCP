@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
-import type { AccountMode } from '../auth/mockAuth'
+import type { AccountMode } from '../auth/localProfile'
 
 type AuthForm = 'sign-in' | 'sign-up'
 
@@ -9,7 +9,7 @@ const inputClass =
 const buttonClass =
   'w-full rounded-lg bg-brand px-4 py-2.5 text-button font-medium text-primary-foreground hover:opacity-90'
 
-/** Render the demo signup/login form and collect the preferred operating mode. */
+/** Render the local profile signup/login form and collect the preferred operating mode. */
 export default function AuthPage(): React.JSX.Element {
   const { signIn, signUp, continueAsGuest } = useAuth()
   const [form, setForm] = useState<AuthForm>('sign-in')
@@ -19,29 +19,19 @@ export default function AuthPage(): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [hostAddress, setHostAddress] = useState('')
   const [busy, setBusy] = useState(false)
 
-  /** Validate credentials and authenticate against the selected gateway. */
+  /** Validate the local profile and enter the app. */
   async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     setError(null)
-    setNotice(null)
     setBusy(true)
     try {
-      if (mode === 'client' && !hostAddress.trim()) throw new Error('Enter the host gateway address.')
-      let status: 'pending' | 'approved' | 'revoked'
       if (form === 'sign-up') {
         if (password !== confirmPassword) throw new Error('Passwords do not match.')
-        status = await signUp(name, email, password, mode, mode === 'client' ? hostAddress.trim() : '')
+        await signUp(name, email, password, mode)
       } else {
-        status = await signIn(email, password, mode, mode === 'client' ? hostAddress.trim() : '')
-      }
-      if (status === 'pending') {
-        setNotice('Your account is waiting for approval from the gateway host. Once approved, log in again.')
-      } else if (status === 'revoked') {
-        setError('This account has been revoked by the gateway host.')
+        await signIn(email, password, mode)
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -63,9 +53,9 @@ export default function AuthPage(): React.JSX.Element {
             </p>
           </div>
           <div className="mt-10 rounded-xl border border-border bg-surface-raised p-4">
-            <div className="text-label text-ink-muted uppercase">Gateway accounts</div>
+            <div className="text-label text-ink-muted uppercase">Local profile</div>
             <p className="mt-2 text-body-small text-ink">
-              Accounts are stored by each gateway and linked to the verified Tailscale identity. New client accounts require host approval.
+              Sign in is only for this app. Gateway hosts separately approve your verified Tailscale identity.
             </p>
           </div>
         </section>
@@ -88,29 +78,12 @@ export default function AuthPage(): React.JSX.Element {
             ))}
           </div>
 
-          <h2 className="text-h2 text-ink-heading">{form === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
+          <h2 className="text-h2 text-ink-heading">{form === 'sign-in' ? 'Welcome back' : 'Create your profile'}</h2>
           <p className="mt-1 text-body-small text-ink">
-            {mode === 'client'
-              ? 'Sign in to a gateway hosted by a teammate.'
-              : form === 'sign-in'
-                ? 'Log in to this gateway.'
-                : 'Create the host account for this gateway.'}
+            {form === 'sign-in' ? 'Log in to your local app profile.' : 'Create a local app profile.'}
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
-            {mode === 'client' && (
-              <label className="block text-body-small text-ink-emphasis">
-                Host gateway address
-                <input
-                  autoComplete="url"
-                  className={`${inputClass} mt-1.5`}
-                  value={hostAddress}
-                  onChange={(event) => setHostAddress(event.target.value)}
-                  placeholder="100.64.12.21:8788"
-                  required
-                />
-              </label>
-            )}
             {form === 'sign-up' && (
               <label className="block text-body-small text-ink-emphasis">
                 Name
@@ -185,11 +158,9 @@ export default function AuthPage(): React.JSX.Element {
 
             {error && <p role="alert" className="rounded-lg border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-body-small text-status-blocked">{error}</p>}
             <button type="submit" disabled={busy} className={`${buttonClass} disabled:opacity-60`}>
-              {busy ? 'Connecting…' : form === 'sign-in' ? 'Log in' : 'Create account'}
+              {busy ? 'Please wait…' : form === 'sign-in' ? 'Log in' : 'Create profile'}
             </button>
           </form>
-
-          {notice && <p role="status" className="mt-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-body-small text-ink-emphasis">{notice}</p>}
 
           {import.meta.env.DEV && (
             <button
@@ -207,7 +178,7 @@ export default function AuthPage(): React.JSX.Element {
             </p>
           )}
           <p className="mt-4 text-caption leading-relaxed text-ink-muted">
-            Your password is hashed and stored only by the gateway you select. Client access is linked to your Tailscale identity and the gateway host must approve new accounts.
+            This profile exists only in this app session and does not grant gateway access. Hosts verify your Tailscale identity and approve access separately.
           </p>
         </section>
       </div>

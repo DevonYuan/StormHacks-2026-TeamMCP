@@ -1,15 +1,14 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { MockAuthStore } from './mockAuth'
-import type { AccountMode, AuthEvent, AuthUser } from './mockAuth'
-import type { AccountStatus } from '@shared/account'
+import { LocalProfileStore } from './localProfile'
+import type { AccountMode, AuthEvent, AuthUser } from './localProfile'
 
 interface AuthContextValue {
   user: AuthUser | null
   mode: AccountMode
   events: AuthEvent[]
-  signIn(email: string, password: string, mode: AccountMode, hostAddress?: string): Promise<AccountStatus>
-  signUp(name: string, email: string, password: string, mode: AccountMode, hostAddress?: string): Promise<AccountStatus>
+  signIn(email: string, password: string, mode: AccountMode): Promise<void>
+  signUp(name: string, email: string, password: string, mode: AccountMode): Promise<void>
   continueAsGuest(mode: AccountMode): void
   signOut(): void
   setMode(mode: AccountMode): void
@@ -17,25 +16,9 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function toAuthUser(
-  account: AuthUser | { id: string; name: string; email: string; createdAt: number; tailscaleUser: string; tailnet: string },
-  hostAddress: string,
-): AuthUser {
-  if (!('id' in account)) return account
-  return {
-    name: account.name,
-    email: account.email,
-    createdAt: account.createdAt,
-    accountId: account.id,
-    tailscaleUser: account.tailscaleUser,
-    tailnet: account.tailnet,
-    hostAddress: hostAddress || undefined,
-  }
-}
-
-/** Provide the gateway-backed account session and development-only demo history. */
+/** Provide a local app profile; gateway access is controlled independently by Tailscale approval. */
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const [store] = useState(() => new MockAuthStore())
+  const [store] = useState(() => new LocalProfileStore(import.meta.env.DEV))
   const [user, setUser] = useState<AuthUser | null>(null)
   const [mode, setModeState] = useState<AccountMode>('server')
   const [, setRevision] = useState(0)
@@ -46,21 +29,11 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     email: string,
     password: string,
     nextMode: AccountMode,
-    hostAddress = '',
-  ): Promise<AccountStatus> => {
-    const api = window.electronAPI
-    if (!api && !import.meta.env.DEV) {
-      throw new Error('Account authentication requires the desktop application.')
-    }
-    const result = api
-      ? await api.accounts.signIn(hostAddress, email, password)
-      : { account: store.signIn(email, password, nextMode), status: 'approved' as const }
-    if (result.status !== 'approved') return result.status
-    const signedInUser = toAuthUser(result.account, hostAddress)
+  ): Promise<void> => {
+    const signedInUser = store.signIn(email, password, nextMode)
     setUser(signedInUser)
     setModeState(nextMode)
     refreshEvents()
-    return result.status
   }, [store, refreshEvents])
 
   const signUp = useCallback(async (
@@ -68,21 +41,11 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     email: string,
     password: string,
     nextMode: AccountMode,
-    hostAddress = '',
-  ): Promise<AccountStatus> => {
-    const api = window.electronAPI
-    if (!api && !import.meta.env.DEV) {
-      throw new Error('Account authentication requires the desktop application.')
-    }
-    const result = api
-      ? await api.accounts.signUp(hostAddress, name, email, password)
-      : { account: store.signUp(name, email, password, nextMode), status: 'approved' as const }
-    if (result.status !== 'approved') return result.status
-    const newUser = toAuthUser(result.account, hostAddress)
+  ): Promise<void> => {
+    const newUser = store.signUp(name, email, password, nextMode)
     setUser(newUser)
     setModeState(nextMode)
     refreshEvents()
-    return result.status
   }, [store, refreshEvents])
 
   const continueAsGuest = useCallback((nextMode: AccountMode) => {

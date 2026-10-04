@@ -14,7 +14,7 @@ import type { GatewayConfig } from '@shared/config'
 import type { PolicyDocument, PolicyRule } from '@shared/policy'
 import type { ServerConfig } from '@shared/protocol'
 import type { Device } from '@shared/types'
-import type { PublicGatewayAccount } from '@shared/account'
+import type { GatewayApproval } from '@shared/account'
 import { useAuth } from '../auth/AuthContext'
 import { useNetworkData } from '../data/NetworkData'
 
@@ -587,14 +587,14 @@ function Network({
   )
 }
 
-/** Show the signed-in demo profile and volatile authentication event history. */
+/** Show the signed-in local profile and volatile authentication event history. */
 function AccountActivity(): React.JSX.Element {
   const { user, mode, events, signOut } = useAuth()
 
   return (
     <Section
-      title="Demo account"
-      hint="This profile and its activity history exist only in this app session; they are not database-backed."
+      title="Local profile"
+      hint="This profile is only for the app UI. Each gateway separately authorizes your verified Tailscale identity."
     >
       <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
         <div>
@@ -635,16 +635,16 @@ function AccountActivity(): React.JSX.Element {
   )
 }
 
-/** Let the gateway host approve and revoke accounts linked to its tailnet. */
-function GatewayAccounts(): React.JSX.Element | null {
+/** Let the gateway host approve and revoke Tailscale identities for this gateway. */
+function GatewayApprovals(): React.JSX.Element | null {
   const { mode } = useAuth()
-  const [accounts, setAccounts] = useState<PublicGatewayAccount[]>([])
+  const [approvals, setApprovals] = useState<GatewayApproval[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async (): Promise<void> => {
     if (mode !== 'server' || !window.electronAPI) return
     try {
-      setAccounts(await window.electronAPI.accounts.list())
+      setApprovals(await window.electronAPI.approvals.list())
       setError(null)
     } catch (reason) {
       setError(message(reason))
@@ -659,10 +659,10 @@ function GatewayAccounts(): React.JSX.Element | null {
 
   if (mode !== 'server') return null
 
-  const updateAccount = async (accountId: string, action: 'approve' | 'revoke'): Promise<void> => {
+  const updateApproval = async (id: string, action: 'approve' | 'revoke'): Promise<void> => {
     try {
-      if (action === 'approve') await window.electronAPI.accounts.approve(accountId)
-      else await window.electronAPI.accounts.revoke(accountId)
+      if (action === 'approve') await window.electronAPI.approvals.approve(id)
+      else await window.electronAPI.approvals.revoke(id)
       await reload()
     } catch (reason) {
       setError(message(reason))
@@ -670,48 +670,66 @@ function GatewayAccounts(): React.JSX.Element | null {
   }
 
   return (
-    <Section title="Gateway accounts" hint="Approve a Tailscale user once to allow their devices to reconnect. Revoking an account closes its active MCP sessions.">
+    <Section title="Gateway access" hint="This host stores its own approvals. Approve a Tailscale user once for all their devices; revoking closes their active MCP sessions.">
       {error && <p role="alert" className="mb-3 text-body-small text-status-blocked">{error}</p>}
-      {accounts.filter(account => account.status === 'pending').length > 0 ? (
+      {approvals.filter(approval => approval.status === 'pending').length > 0 ? (
         <>
           <h3 className="mb-2 text-h5 text-ink-muted uppercase">Waiting for approval</h3>
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {accounts.filter(account => account.status === 'pending').map(account => (
-            <li key={account.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-body-small font-medium text-ink-emphasis">
-                  {account.name} · {account.email}
-                </div>
-                <div className="truncate text-caption text-ink">
-                  Tailscale: {account.tailscaleUser} · {account.tailnet}
-                </div>
-              </div>
-              <button type="button" onClick={() => void updateAccount(account.id, 'approve')} className={primaryButton}>
-                Approve
-              </button>
-            </li>
-          ))}
-        </ul>
-        </>
-      ) : (
-        <p className="text-body-small text-ink">No accounts waiting for approval.</p>
-      )}
-      {accounts.some(account => account.status === 'approved') && (
-        <div className="mt-5">
-          <h3 className="mb-2 text-h5 text-ink-muted uppercase">Approved accounts</h3>
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {accounts.filter(account => account.status === 'approved').map(account => (
-              <li key={account.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+            {approvals.filter(approval => approval.status === 'pending').map(approval => (
+              <li key={approval.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-body-small font-medium text-ink-emphasis">
-                    {account.name} · {account.email}
+                    {approval.tailscaleUser}
                   </div>
                   <div className="truncate text-caption text-ink">
-                    Tailscale: {account.tailscaleUser} · {account.tailnet}
+                    Tailnet: {approval.tailnet} · First device: {approval.device || 'Unknown'}
                   </div>
                 </div>
-                <button type="button" onClick={() => void updateAccount(account.id, 'revoke')} className={secondaryButton}>
+                <button type="button" onClick={() => void updateApproval(approval.id, 'approve')} className={primaryButton}>
+                  Approve
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="text-body-small text-ink">No access requests waiting for approval.</p>
+      )}
+      {approvals.some(approval => approval.status === 'approved') && (
+        <div className="mt-5">
+          <h3 className="mb-2 text-h5 text-ink-muted uppercase">Approved Tailscale users</h3>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {approvals.filter(approval => approval.status === 'approved').map(approval => (
+              <li key={approval.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-body-small font-medium text-ink-emphasis">
+                    {approval.tailscaleUser}
+                  </div>
+                  <div className="truncate text-caption text-ink">
+                    Tailnet: {approval.tailnet}
+                  </div>
+                </div>
+                <button type="button" onClick={() => void updateApproval(approval.id, 'revoke')} className={secondaryButton}>
                   Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {approvals.some(approval => approval.status === 'revoked') && (
+        <div className="mt-5">
+          <h3 className="mb-2 text-h5 text-ink-muted uppercase">Revoked Tailscale users</h3>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {approvals.filter(approval => approval.status === 'revoked').map(approval => (
+              <li key={approval.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-body-small font-medium text-ink-emphasis">{approval.tailscaleUser}</div>
+                  <div className="truncate text-caption text-ink">Tailnet: {approval.tailnet}</div>
+                </div>
+                <button type="button" onClick={() => void updateApproval(approval.id, 'approve')} className={primaryButton}>
+                  Restore
                 </button>
               </li>
             ))}
@@ -764,7 +782,7 @@ export default function Settings(): React.JSX.Element {
         <AccountActivity />
       </div>
       <div className="mb-6">
-        <GatewayAccounts />
+        <GatewayApprovals />
       </div>
 
       {error && (

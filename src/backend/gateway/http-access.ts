@@ -18,9 +18,6 @@ export function isManagementRequestAllowed(
   return (
     path === "/health" ||
     path === "/mcp" ||
-    path.startsWith("/mcp/") ||
-    path === "/auth/signup" ||
-    path === "/auth/login" ||
-    path === "/auth/devices"
+    path.startsWith("/mcp/")
   )
 }

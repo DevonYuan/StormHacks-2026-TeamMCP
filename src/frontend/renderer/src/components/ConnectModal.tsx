@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { Modal } from './Modal'
 import { useNetworkData } from '../data/NetworkData'
 import { useAuth } from '../auth/AuthContext'
-import { isSamePeerGateway } from '@shared/peer'
 
 /** "Connect to a teammate": register their exposed gateway as a peer. */
 export function ConnectModal({
@@ -13,8 +12,8 @@ export function ConnectModal({
   onClose: () => void
 }): React.JSX.Element {
   const { available, servers, addPeer, probePeer, removePeer } = useNetworkData()
-  const { user, mode } = useAuth()
-  const [address, setAddress] = useState(user?.hostAddress ?? '')
+  const { mode } = useAuth()
+  const [address, setAddress] = useState('')
   const [busy, setBusy] = useState<null | 'test' | 'connect'>(null)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
@@ -26,14 +25,9 @@ export function ConnectModal({
     setError(null)
     setOk(null)
     try {
-      const accountId = mode === 'client' ? user?.accountId : undefined
-      if (mode === 'client' && !accountId) throw new Error('Sign in to the host gateway before connecting.')
-      if (mode === 'client' && !isSamePeerGateway(address, user?.hostAddress ?? '')) {
-        throw new Error('Sign in to this gateway address before connecting.')
-      }
       const result = action === 'test'
-        ? await probePeer(address, accountId)
-        : await addPeer(address, accountId)
+        ? await probePeer(address)
+        : await addPeer(address)
       setOk(
         action === 'test'
           ? `Reachable — ${result.tools.length} tool(s) available`
@@ -41,7 +35,10 @@ export function ConnectModal({
       )
       if (action === 'connect') setAddress('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const message = e instanceof Error ? e.message : String(e)
+      setError(/waiting for host approval/i.test(message)
+        ? 'Access request sent. Ask the gateway host to approve your Tailscale user in Settings, then retry.'
+        : message)
     } finally {
       setBusy(null)
     }
@@ -53,7 +50,7 @@ export function ConnectModal({
       onClose={onClose}
       title="Connect to a teammate"
       subtitle={mode === 'client'
-        ? 'Connect using your approved gateway account and Tailscale identity.'
+        ? 'Connect to any host on your tailnet. Each host controls access separately and may require approval.'
         : "Add a teammate's exposed gateway so their MCP tools appear in yours."}
     >
       {!available ? (

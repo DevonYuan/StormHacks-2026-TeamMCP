@@ -19,7 +19,8 @@ describe('gateway HTTP access', () => {
     (address) => {
       expect(isManagementRequestAllowed(address, '/api/servers')).toBe(false)
       expect(isManagementRequestAllowed(address, '/auth/token')).toBe(false)
-      expect(isManagementRequestAllowed(address, '/api/accounts')).toBe(false)
+      expect(isManagementRequestAllowed(address, '/api/approvals')).toBe(false)
+      expect(isManagementRequestAllowed(address, '/auth/signup')).toBe(false)
       expect(isManagementRequestAllowed(address, '/policy')).toBe(false)
     }
   )
@@ -28,9 +29,6 @@ describe('gateway HTTP access', () => {
     expect(isManagementRequestAllowed('100.64.0.1', '/mcp')).toBe(true)
     expect(isManagementRequestAllowed('100.64.0.1', '/mcp/session')).toBe(true)
     expect(isManagementRequestAllowed('100.64.0.1', '/health')).toBe(true)
-    expect(isManagementRequestAllowed('100.64.0.1', '/auth/signup')).toBe(true)
-    expect(isManagementRequestAllowed('100.64.0.1', '/auth/login')).toBe(true)
-    expect(isManagementRequestAllowed('100.64.0.1', '/auth/devices')).toBe(true)
-    expect(isManagementRequestAllowed('100.64.0.1', '/api/accounts')).toBe(false)
+    expect(isManagementRequestAllowed('100.64.0.1', '/api/approvals')).toBe(false)
   })
 })

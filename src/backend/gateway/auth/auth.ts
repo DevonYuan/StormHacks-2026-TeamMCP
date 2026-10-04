@@ -3,7 +3,7 @@
  */
 
 import { GatewayConfig } from '../../shared/config.js'
-import { Identity, AuthResult, TokenClaims } from '../../shared/policy.js'
+import { Identity, TokenClaims } from '../../shared/policy.js'
 import { RevokedTokenRepository } from '../db/repository.js'
 import {
   resolveIdentityFromIp,
@@ -16,7 +16,6 @@ import {
   getSigningKeyPair,
   exportPrivateKeyBase64,
   exportPublicKeyBase64,
-  createSessionToken,
   verifySessionToken,
   revokeToken,
   getPermissionsFromToken,
@@ -27,7 +26,7 @@ export interface AuthContext {
   identity: Identity
   token: string
   claims: TokenClaims
-  accountId?: string
+  approvalId?: string
 }
 
 export class AuthManager {
@@ -62,32 +61,6 @@ export class AuthManager {
 
   exportPrivateKey(): string | null {
     return exportPrivateKeyBase64()
-  }
-
-  // Authenticate a connection from a client IP
-  async authenticateConnection(clientIp: string): Promise<AuthResult> {
-    const identity = await this.resolveClientIdentity(clientIp)
-
-    if (!identity) {
-      return {
-        success: false,
-        error: 'Unable to resolve identity. Ensure Tailscale is running and connected.',
-      }
-    }
-
-    // Create session token with default permissions (will be refined by policy)
-    const permissions: TokenClaims['permissions'] = {
-      servers: [], // Will be filtered by policy
-      tools: [],
-    }
-
-    const token = createSessionToken(identity, permissions, this.config)
-
-    return {
-      success: true,
-      identity,
-      token,
-    }
   }
 
   async resolveClientIdentity(clientIp: string): Promise<Identity | null> {

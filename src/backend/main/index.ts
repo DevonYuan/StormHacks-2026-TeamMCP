@@ -31,7 +31,7 @@ import { registerPolicyActivityIpcHandlers } from "./ipc/policy-activity.js";
 import { registerGatewayLifecycleIpcHandlers } from "./ipc/gateway-lifecycle.js";
 import { registerSystemIpcHandlers } from "./ipc/system.js";
 import { registerNetworkIpcHandlers } from "./ipc/network.js";
-import { registerAccountIpcHandlers } from "./ipc/accounts.js";
+import { registerApprovalIpcHandlers } from "./ipc/approvals.js";
 import type { HostStats } from "../shared/types.js";
 import pino from "pino";
 
@@ -559,7 +559,7 @@ function setupIpcHandlers(): void {
     isGatewayRunning: () => isGatewayRunning,
   });
 
-  registerAccountIpcHandlers({ gatewayFetch, ensureGatewayRunning });
+  registerApprovalIpcHandlers({ gatewayFetch, ensureGatewayRunning });
 
   ipcMain.on(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, (_event, url: string) => {
     void shell.openExternal(url);

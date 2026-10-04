@@ -47,6 +47,11 @@ function loadMigrations(): Migration[] {
       name: 'gateway_accounts',
       up: readFileSync(join(dirname(schemaPath), 'migrations', '002_gateway_accounts.sql'), 'utf-8'),
     },
+    {
+      version: 3,
+      name: 'gateway_approvals',
+      up: readFileSync(join(dirname(schemaPath), 'migrations', '003_gateway_approvals.sql'), 'utf-8'),
+    },
   ]
 }
 

@@ -27,7 +27,7 @@ import type { Identity, TokenClaims } from '../../shared/policy.js'
 import { MCPClientManager } from './client.js'
 import { PolicyEngine } from '../authz/policy.js'
 import { AuthManager, AuthContext } from '../auth/auth.js'
-import type { GatewayAccountService } from '../auth/accounts.js'
+import type { GatewayApprovalService } from '../auth/approvals.js'
 import { ActivityRepository, ServerHealthRepository } from '../db/repository.js'
 import { GatewayConfig } from '../../shared/config.js'
 import pino from 'pino'
@@ -39,7 +39,7 @@ export interface ProxyServerOptions {
   clientManager: MCPClientManager
   policyEngine: PolicyEngine
   authManager: AuthManager
-  accountService: GatewayAccountService
+  approvalService: GatewayApprovalService
   activityRepo: ActivityRepository
   healthRepo: ServerHealthRepository
 }
@@ -342,9 +342,9 @@ export class MCPProxyServer {
     this.activeSessions.delete(sessionId)
   }
 
-  async revokeAccountSessions(accountId: string): Promise<void> {
+  async revokeApprovalSessions(approvalId: string): Promise<void> {
     const sessionIds = [...this.activeSessions]
-      .filter(([, context]) => context.accountId === accountId)
+      .filter(([, context]) => context.approvalId === approvalId)
       .map(([sessionId]) => sessionId)
     for (const sessionId of sessionIds) {
       const session = this.sessions.get(sessionId)
@@ -355,7 +355,7 @@ export class MCPProxyServer {
         await session.transport.close()
         await session.server.close()
       } catch (error) {
-        logger.warn({ error, sessionId, accountId }, 'Failed to close revoked account session')
+        logger.warn({ error, sessionId, approvalId }, 'Failed to close revoked access session')
       }
     }
   }
@@ -447,19 +447,27 @@ export class MCPProxyServer {
     }
 
     const identity = await this.options.authManager.resolveClientIdentity(this.clientIp(req))
-    const rawAccountId = req.headers['x-tether-account-id']
-    const accountId = Array.isArray(rawAccountId) ? rawAccountId[0] : rawAccountId
     const localDevelopment = process.env.NODE_ENV !== 'production' &&
       (this.clientIp(req) === '127.0.0.1' || this.clientIp(req) === '::1')
-    const account = identity && accountId
-      ? this.options.accountService.authorize(accountId, identity)
+    const existingApproval = identity
+      ? this.options.approvalService.authorize(identity)
       : undefined
+    const approval = identity && !existingApproval && !localDevelopment
+      ? this.options.approvalService.request(identity)
+      : existingApproval
 
-    if ((!identity || (!account && !localDevelopment)) || (accountId && !account)) {
-      res.writeHead(401, { 'Content-Type': 'application/json' })
+    if (!identity || (approval?.status !== 'approved' && !localDevelopment)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'An approved gateway account and matching Tailscale identity are required.' },
+        error: {
+          code: -32000,
+          message: approval?.status === 'revoked'
+            ? 'Gateway access has been revoked by the host.'
+            : approval
+              ? 'Your Tailscale identity is waiting for host approval.'
+              : 'A verified Tailscale identity is required.',
+        },
         id: null,
       }))
       return
@@ -472,7 +480,7 @@ export class MCPProxyServer {
         this.sessions.set(sid, { server, transport })
         this.activeSessions.set(sid, {
           identity: identity!,
-          accountId: account?.id,
+          approvalId: approval?.id,
           token: '',
           claims: this.buildClaims(identity!),
         })
