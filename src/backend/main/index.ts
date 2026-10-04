@@ -171,9 +171,12 @@ function startGateway(): Promise<void> {
       ? ["--port", String(gatewayConfig.port), "--bind", gatewayConfig.bindAddr]
       : [];
 
+    // Run the gateway with the system Node (it needs node:sqlite, ≥22.5). Spawning
+    // `node --import tsx` directly — not `npx tsx` — keeps gatewayProcess as the real
+    // process so SIGTERM kills it cleanly; an npx wrapper leaks the child (and the port).
     gatewayProcess = spawn(
-      isDev ? "npx" : "node",
-      isDev ? ["tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
+      "node",
+      isDev ? ["--import", "tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
       {
         env: {
           ...process.env,
@@ -233,28 +236,9 @@ function startGateway(): Promise<void> {
       });
     });
 
-    gatewayProcess.on("error", (error) => {
-      logger.error({ error }, "Gateway process error");
-      gatewayProcess = null;
-      isGatewayRunning = false;
-      mainWindow?.webContents.send(
-        IPC_CHANNELS.GATEWAY_STATUS,
-        getGatewayStatus(),
-      );
-      reject(error);
-    });
+    let ready = false;
 
-    gatewayProcess.on("exit", (code, signal) => {
-      logger.info({ code, signal }, "Gateway process exited");
-      gatewayProcess = null;
-      isGatewayRunning = false;
-      mainWindow?.webContents.send(
-        IPC_CHANNELS.GATEWAY_STATUS,
-        getGatewayStatus(),
-      );
-    });
-
-    // Wait for gateway to be ready (health check)
+    // Poll for readiness. Declared before the exit/error handlers so they can clear it.
     const checkReady = setInterval(async () => {
       try {
         const response = await fetch(
@@ -262,6 +246,7 @@ function startGateway(): Promise<void> {
         );
         if (response.ok) {
           clearInterval(checkReady);
+          ready = true;
           isGatewayRunning = true;
           mainWindow?.webContents.send(
             IPC_CHANNELS.GATEWAY_STATUS,
@@ -273,6 +258,38 @@ function startGateway(): Promise<void> {
         // Not ready yet
       }
     }, 500);
+
+    gatewayProcess.on("error", (error) => {
+      logger.error({ error }, "Gateway process error");
+      clearInterval(checkReady);
+      gatewayProcess = null;
+      isGatewayRunning = false;
+      mainWindow?.webContents.send(
+        IPC_CHANNELS.GATEWAY_STATUS,
+        getGatewayStatus(),
+      );
+      reject(error);
+    });
+
+    gatewayProcess.on("exit", (code, signal) => {
+      logger.info({ code, signal }, "Gateway process exited");
+      clearInterval(checkReady);
+      gatewayProcess = null;
+      isGatewayRunning = false;
+      mainWindow?.webContents.send(
+        IPC_CHANNELS.GATEWAY_STATUS,
+        getGatewayStatus(),
+      );
+      if (!ready) {
+        reject(
+          new Error(
+            `Gateway exited before becoming ready (code ${code ?? "?"}${
+              signal ? `, signal ${signal}` : ""
+            }). Check the gateway logs for the bind error.`,
+          ),
+        );
+      }
+    });
 
     // Timeout after 10 seconds
     setTimeout(() => {
@@ -368,6 +385,7 @@ function hostStats(): HostStats {
 
 interface LocalTailnetInfo {
   available: boolean;
+  state: string | null;
   ip: string | null;
   hostname: string | null;
   dnsName: string | null;
@@ -376,22 +394,28 @@ interface LocalTailnetInfo {
 /** Read this machine's tailnet identity directly (independent of the gateway process). */
 function getLocalTailnet(): Promise<LocalTailnetInfo> {
   return new Promise((resolve) => {
+    const down = (state: string | null): void =>
+      resolve({ available: false, state, ip: null, hostname: null, dnsName: null });
     execFile("tailscale", ["status", "--json"], { timeout: 4000 }, (error, stdout) => {
       if (error) {
-        resolve({ available: false, ip: null, hostname: null, dnsName: null });
+        down(null);
         return;
       }
       try {
         const parsed = JSON.parse(stdout);
+        const state: string = parsed?.BackendState ?? "Unknown";
         const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
+        // The 100.x address is only bindable while the tunnel is actually up.
+        const up = state === "Running" && ips.length > 0;
         resolve({
-          available: ips.length > 0,
-          ip: ips[0] ?? null,
+          available: up,
+          state,
+          ip: up ? ips[0] : null,
           hostname: parsed?.Self?.HostName ?? null,
           dnsName: parsed?.Self?.DNSName ?? null,
         });
       } catch {
-        resolve({ available: false, ip: null, hostname: null, dnsName: null });
+        down(null);
       }
     });
   });
@@ -426,13 +450,20 @@ function setupIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.GATEWAY_EXPOSE, async () => {
     const tailnet = await getLocalTailnet();
 
+    // Refuse before touching the running gateway so a misconfigured Tailscale
+    // doesn't leave the user with no gateway at all.
+    if (!tailnet.available || !tailnet.ip) {
+      throw new Error(
+        `Tailscale is not connected (state: ${tailnet.state ?? "unavailable"}). ` +
+          `Connect Tailscale, then try again.`,
+      );
+    }
+
     // A running gateway keeps its old bind address, so restart to rebind.
     if (gatewayProcess) await stopGateway();
 
-    if (tailnet.ip) {
-      gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, bindAddr: tailnet.ip });
-      appConfig = { ...appConfig, gateway: gatewayConfig };
-    }
+    gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, bindAddr: tailnet.ip });
+    appConfig = { ...appConfig, gateway: gatewayConfig };
 
     await startGateway();
     return { success: true, bindAddr: gatewayConfig.bindAddr, tailnet };

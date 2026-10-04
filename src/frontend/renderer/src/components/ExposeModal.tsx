@@ -118,13 +118,24 @@ export function ExposeModal({
             {exposed ? 'Exposed to your tailnet' : 'Running locally only'}
           </div>
 
+          {!exposed && (
+            <button
+              onClick={() => void start()}
+              disabled={busy}
+              className="w-full rounded-lg bg-signal px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {busy ? 'Exposing…' : 'Expose to tailnet'}
+            </button>
+          )}
+
           <Field label="Address teammates connect to" value={address} onCopy={() => copy(address)} />
           <Field label="MCP endpoint" value={mcpUrl} onCopy={() => copy(mcpUrl)} />
 
           {!exposed && (
             <p className="text-xs text-muted">
-              Tailscale isn’t available, so this is reachable only on this machine. Start Tailscale to
-              share it with your team.
+              {share?.tailscale.available
+                ? 'The gateway is bound to loopback, so it is only reachable on this machine. Expose it to rebind to your tailnet interface.'
+                : 'Tailscale isn’t available, so this is reachable only on this machine. Start Tailscale, then expose again.'}
             </p>
           )}
 

@@ -81,6 +81,7 @@ const api = {
           bindAddr: string
           tailnet: {
             available: boolean
+            state: string | null
             ip: string | null
             hostname: string | null
             dnsName: string | null
