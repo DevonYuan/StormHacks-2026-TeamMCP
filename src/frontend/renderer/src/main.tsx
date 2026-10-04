@@ -4,11 +4,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { NetworkDataProvider } from './data/NetworkData'
+import { AuthProvider } from './auth/AuthContext'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <NetworkDataProvider>
-      <App />
-    </NetworkDataProvider>
+    <AuthProvider>
+      <NetworkDataProvider>
+        <App />
+      </NetworkDataProvider>
+    </AuthProvider>
   </StrictMode>
 )

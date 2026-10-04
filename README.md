@@ -130,10 +130,12 @@ This is **not** the right choice when you need 24/7 availability, elastic scale,
 | Networking | **Tailscale** primary, **LAN** for local demo | Tailscale gives NAT traversal, WireGuard encryption, and device identity with zero infrastructure. We consume it — we do not rebuild it. Hostname/address discovered via `tailscale status --json`. |
 | AuthN | **Tailscale identity (WhoIs)** + **Ed25519-signed session tokens** | `tailscale whois` maps a connection to a device/user identity; short-lived signed tokens scope that identity to a session. Secrets stored via Electron **`safeStorage`** (OS keychain). |
 | AuthZ | **Policy file (declarative) → RBAC** | Identity → allowed servers → allowed tools, stored locally and hot-reloadable. |
-| Persistence | **SQLite (`better-sqlite3`)** | Server registry, users, policy, and the activity log in one embedded, zero-ops database. |
+| Persistence | **SQLite (`node:sqlite`)** | The gateway stores its server registry, policy, health, activity, and revoked-token data locally. The demo signup/login UI does not persist accounts. |
 | Validation / config | **Zod** | Validate policy files, config, and untrusted protocol payloads at the boundary. |
 | Logging | **pino** + SQLite activity store | Structured logs for debugging; a queryable activity log streamed live to the UI. |
 | Testing | **Vitest** (unit) + **Playwright** (Electron E2E) | Fast unit tests for routing/policy; real end-to-end runs through the actual Electron app. |
+
+The current login/signup screen is a **local UI demo only**: accounts and login events are held in memory and disappear when the app reloads. Development builds also include a **Skip for development** guest session; it is not included in production builds. Neither option authenticates gateway requests or replaces Tailscale identity and the gateway's server-side authorization policy. The gateway's existing SQLite store is for gateway data; account persistence is not implemented.
 
 ### Explicitly rejected for the MVP
 
