@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ActivityEntry, ActivityStats, GatewayStatus } from '@shared/activity'
 
 /**
- * Fleet view. Rows are built from the gateway admin API:
+ * Gateway view. Rows are built from the gateway admin API:
  *   GET /api/status, GET /api/tailscale, GET /api/activity, GET /api/activity/stats
  * The local machine comes from status + Tailscale. Peers are distinct identities
  * in the activity log (that API does not include their IP).
@@ -32,7 +32,7 @@ interface Machine {
   badge: string
 }
 
-interface FleetSnapshot {
+interface GatewaySnapshot {
   status: GatewayStatus | null
   tailscale: TailscaleInfo | null
   entries: ActivityEntry[]
@@ -94,7 +94,7 @@ async function settle<T>(task: Promise<T>): Promise<T | null> {
   }
 }
 
-async function loadFleet(): Promise<FleetSnapshot> {
+async function loadGateway(): Promise<GatewaySnapshot> {
   const api = bridge()
   const [status, tailscale, entries, stats] = await Promise.all([
     settle(api ? api.gateway.getStatus() : fetchJson<GatewayStatus>('/api/status')),
@@ -126,23 +126,38 @@ function peerStatus(entry: ActivityEntry): MachineStatus {
   return 'offline'
 }
 
-function buildMachines(fleet: FleetSnapshot): Machine[] {
+/** FNV-1a, 32-bit. Math.imul keeps the multiply from losing precision. */
+function hash32(value: string): number {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    hash = Math.imul(hash ^ value.charCodeAt(i), 0x01000193)
+  }
+  return hash >>> 0
+}
+
+// Same address and port always produce the same id, so rows stay stable across polls.
+function generateGatewayId(status: GatewayStatus): string {
+  const digest = hash32(`${status.boundAddress}:${status.port}`)
+  return `gw-${digest.toString(16).padStart(8, '0')}`
+}
+
+function buildMachines(gateway: GatewaySnapshot): Machine[] {
   const machines: Machine[] = []
-  if (fleet.status) {
-    const host = fleet.tailscale
+  if (gateway.status) {
+    const host = gateway.tailscale
     machines.push({
       id: 'local-gateway',
       name: host?.hostname || 'This machine',
       subtitle: host?.dnsName || 'Local gateway',
-      ip: host?.ip || fleet.status.boundAddress,
-      gatewayId: `${fleet.status.boundAddress}:${fleet.status.port}`,
-      status: fleet.status.running ? 'connected' : 'offline',
+      ip: host?.ip || gateway.status.boundAddress,
+      gatewayId: generateGatewayId(gateway.status),
+      status: gateway.status.running ? 'connected' : 'offline',
       badge: 'Local'
     })
   }
 
   const latest = new Map<string, ActivityEntry>()
-  for (const entry of fleet.entries) {
+  for (const entry of gateway.entries) {
     const identity = entry.identity
     const key = identity.deviceId || `${identity.user}|${identity.device}`
     if (!key || key === '|') continue
@@ -150,7 +165,7 @@ function buildMachines(fleet: FleetSnapshot): Machine[] {
     if (!prev || entry.timestamp > prev.timestamp) latest.set(key, entry)
   }
 
-  const localName = fleet.tailscale?.hostname
+  const localName = gateway.tailscale?.hostname
   for (const [key, entry] of latest) {
     const identity = entry.identity
     const name = identity.device || identity.user || 'Unknown device'
@@ -168,10 +183,10 @@ function buildMachines(fleet: FleetSnapshot): Machine[] {
   return machines
 }
 
-function authFailures(fleet: FleetSnapshot): number {
-  const fromStats = fleet.stats?.errorsByCode?.['403']
+function authFailures(gateway: GatewaySnapshot): number {
+  const fromStats = gateway.stats?.errorsByCode?.['403']
   if (typeof fromStats === 'number') return fromStats
-  return fleet.entries.filter((entry) => entry.errorCode === 403).length
+  return gateway.entries.filter((entry) => entry.errorCode === 403).length
 }
 
 function compareMachines(sortKey: SortKey, a: Machine, b: Machine): number {
@@ -290,7 +305,7 @@ function StatusCell({ status }: { status: MachineStatus }): React.JSX.Element {
 }
 
 export default function Machines(): React.JSX.Element {
-  const [fleet, setFleet] = useState<FleetSnapshot | null>(null)
+  const [gateway, setGateway] = useState<GatewaySnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [query, setQuery] = useState('')
@@ -301,9 +316,9 @@ export default function Machines(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     const tick = (): void => {
-      void loadFleet().then((next) => {
+      void loadGateway().then((next) => {
         if (cancelled) return
-        setFleet(next)
+        setGateway(next)
         setLoading(false)
       })
     }
@@ -315,8 +330,8 @@ export default function Machines(): React.JSX.Element {
     }
   }, [])
 
-  const machines = useMemo(() => (fleet ? buildMachines(fleet) : []), [fleet])
-  const failures = fleet ? authFailures(fleet) : 0
+  const machines = useMemo(() => (gateway ? buildMachines(gateway) : []), [gateway])
+  const failures = gateway ? authFailures(gateway) : 0
   const connected = machines.filter((machine) => machine.status === 'connected').length
   const offline = machines.filter((machine) => machine.status === 'offline').length
 
@@ -342,8 +357,8 @@ export default function Machines(): React.JSX.Element {
 
   const refresh = (): void => {
     setLoading(true)
-    void loadFleet().then((next) => {
-      setFleet(next)
+    void loadGateway().then((next) => {
+      setGateway(next)
       setLoading(false)
     })
   }
@@ -360,7 +375,7 @@ export default function Machines(): React.JSX.Element {
     <div>
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-h4 text-brand-text uppercase">manager for</div>
+          <div className="text-h4 text-brand-text uppercase">Gateway</div>
           <h1 className="text-h1 text-ink-heading">Machines</h1>
         </div>
         <div className="flex gap-3">
@@ -388,24 +403,24 @@ export default function Machines(): React.JSX.Element {
       <div className="mb-8 grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard
           label="Total machines"
-          value={loading && !fleet ? '—' : String(machines.length)}
+          value={loading && !gateway ? '—' : String(machines.length)}
           icon={<IconCpu />}
           tone="bg-brand/10 text-brand-text"
         />
         <StatCard
           label="Connected"
-          value={loading && !fleet ? '—' : String(connected)}
+          value={loading && !gateway ? '—' : String(connected)}
           icon={<IconBolt />}
           tone="bg-status-online/10 text-status-online"
           hint={
-            fleet?.status?.running
+            gateway?.status?.running
               ? { text: 'Active now', className: 'text-ink' }
               : undefined
           }
         />
         <StatCard
           label="Action required"
-          value={loading && !fleet ? '—' : String(offline)}
+          value={loading && !gateway ? '—' : String(offline)}
           icon={<IconAlert />}
           tone="bg-status-degraded/10 text-status-degraded"
           hint={
@@ -414,7 +429,7 @@ export default function Machines(): React.JSX.Element {
         />
         <StatCard
           label="Auth failures"
-          value={loading && !fleet ? '—' : String(failures)}
+          value={loading && !gateway ? '—' : String(failures)}
           icon={<IconShield />}
           tone="bg-status-blocked/10 text-status-blocked"
           hint={
@@ -491,7 +506,7 @@ export default function Machines(): React.JSX.Element {
         <table className="w-full text-left">
           <thead>
             <tr className="border-b border-border bg-surface-muted/40">
-              <th className="px-6 py-4 text-h5 text-ink-muted uppercase">Machine name</th>
+              <th className="px-6 py-4 text-h5 text-ink-muted uppercase">Hosting</th>
               <th className="px-6 py-4 text-h5 text-ink-muted uppercase">IP Address</th>
               <th className="px-6 py-4 text-h5 text-ink-muted uppercase">Gateway Id</th>
               <th className="px-6 py-4 text-h5 text-ink-muted uppercase">Status</th>
@@ -499,10 +514,10 @@ export default function Machines(): React.JSX.Element {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {fleet?.error && machines.length === 0 ? (
+            {gateway?.error && machines.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-6 py-10 text-body text-ink">
-                  {fleet.error}. Start the gateway, then refresh.
+                  {gateway.error}. Start the gateway, then refresh.
                 </td>
               </tr>
             ) : pageRows.length === 0 ? (
