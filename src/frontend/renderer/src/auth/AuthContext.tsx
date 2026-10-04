@@ -19,8 +19,9 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 /** Provide a local app profile; gateway access is controlled independently by Tailscale approval. */
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [store] = useState(() => new LocalProfileStore(import.meta.env.DEV))
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [mode, setModeState] = useState<AccountMode>('server')
+  const [session] = useState(() => store.restoreSession())
+  const [user, setUser] = useState<AuthUser | null>(session?.user ?? null)
+  const [mode, setModeState] = useState<AccountMode>(session?.mode ?? 'server')
   const [, setRevision] = useState(0)
 
   const refreshEvents = useCallback(() => setRevision(revision => revision + 1), [])
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     password: string,
     nextMode: AccountMode,
   ): Promise<void> => {
-    const signedInUser = store.signIn(email, password, nextMode)
+    const signedInUser = await store.signIn(email, password, nextMode)
     setUser(signedInUser)
     setModeState(nextMode)
     refreshEvents()
@@ -42,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     password: string,
     nextMode: AccountMode,
   ): Promise<void> => {
-    const newUser = store.signUp(name, email, password, nextMode)
+    const newUser = await store.signUp(name, email, password, nextMode)
     setUser(newUser)
     setModeState(nextMode)
     refreshEvents()
