@@ -63,6 +63,17 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
+/** True when a Team MCP gateway answers `/health` at `ip:port`. */
+async function probeGateway(ip: string, port: number): Promise<boolean> {
+  try {
+    const host = ip.includes(':') ? `[${ip}]` : ip
+    const res = await fetch(`http://${host}:${port}/health`, { signal: AbortSignal.timeout(1500) })
+    return res.ok && ((await res.json()) as { status?: string }).status === 'ok'
+  } catch {
+    return false
+  }
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
@@ -161,16 +172,16 @@ export class Gateway {
     // Initialize MCP client manager
     const clientManager = new MCPClientManager(config)
 
-    // Connect to registered servers
+    // Connect to registered servers in the background: an unreachable upstream
+    // (e.g. an offline peer, whose TCP connect can hang for minutes) must not
+    // keep the gateway from listening.
     const servers = repos.servers.getEnabled()
     logger.info({ count: servers.length }, 'Connecting to registered MCP servers')
     for (const server of servers) {
-      try {
-        await clientManager.connect(server)
-      } catch (error) {
+      clientManager.connect(server).catch((error) => {
         logger.error({ serverId: server.id, error }, 'Failed to connect to server')
         repos.health.recordFailure(server.id, error instanceof Error ? error.message : String(error))
-      }
+      })
     }
 
     // Start health checks
@@ -331,6 +342,15 @@ export class Gateway {
       case 'policy':
         return this.handlePolicyApi(req, res, id, action, ctx)
 
+      // /api/sessions/:deviceId — close a device's open MCP sessions.
+      case 'sessions': {
+        if (req.method !== 'DELETE') return sendJson(res, 405, { error: 'Method Not Allowed' })
+        if (!id) return sendJson(res, 400, { error: 'Missing device id' })
+        const closed = await ctx.proxyServer.closeSessionsForDevice(decodeURIComponent(id))
+        sendJson(res, 200, { success: true, closed })
+        return
+      }
+
       case 'activity':
         return this.handleActivityApi(req, res, url, id, ctx)
 
@@ -351,10 +371,25 @@ export class Gateway {
           }
           try {
             const nodes = await getTailnetDevices(ctx.config)
+            const sessions = ctx.proxyServer.sessionsByDevice()
+            // ponytail: probes every online peer on each poll, assuming they use our port;
+            // cache results if the tailnet grows past a handful of machines.
+            const devices = await Promise.all(
+              nodes
+                .filter((node) => !node.self)
+                .map(async (node) => ({
+                  ...node,
+                  sessions: sessions.get(node.id) ?? 0,
+                  gatewayUp:
+                    node.online && node.ips[0]
+                      ? await probeGateway(node.ips[0], ctx.config.port)
+                      : false,
+                }))
+            )
             sendJson(res, 200, {
               available: true,
               self: nodes.find((node) => node.self) ?? null,
-              devices: nodes.filter((node) => !node.self),
+              devices,
             })
           } catch (error) {
             logger.warn({ error }, 'Failed to enumerate tailnet devices')

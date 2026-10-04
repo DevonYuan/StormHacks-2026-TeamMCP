@@ -42,10 +42,15 @@ export interface ProxyServerOptions {
   healthRepo: ServerHealthRepository
 }
 
+// ponytail: fixed idle window; make it configurable if clients poll less often.
+const SESSION_IDLE_MS = 2 * 60 * 1000
+
 export class MCPProxyServer {
   private options: ProxyServerOptions
   private sessions = new Map<string, { server: Server; transport: StreamableHTTPServerTransport }>()
   private activeSessions = new Map<string, AuthContext>()
+  /** Per-session liveness: open HTTP requests (incl. SSE streams) and last request time. */
+  private liveness = new Map<string, { open: number; lastAt: number }>()
   private requestCount = 0
   private startTime?: number
 
@@ -336,6 +341,54 @@ export class MCPProxyServer {
   }
 
   /**
+   * Live MCP sessions per Tailscale device id. Clients rarely send DELETE on
+   * exit, so a session only counts while it holds an open stream or made a
+   * request within SESSION_IDLE_MS.
+   */
+  sessionsByDevice(now = Date.now()): Map<string, number> {
+    const counts = new Map<string, number>()
+    for (const [sid, { identity }] of this.activeSessions) {
+      const live = this.liveness.get(sid)
+      if (!live || (live.open === 0 && now - live.lastAt > SESSION_IDLE_MS)) continue
+      counts.set(identity.deviceId, (counts.get(identity.deviceId) ?? 0) + 1)
+    }
+    return counts
+  }
+
+  private touch(sid: string, res?: ServerResponse): void {
+    const live = this.liveness.get(sid) ?? { open: 0, lastAt: 0 }
+    live.lastAt = Date.now()
+    this.liveness.set(sid, live)
+    if (!res) return
+    live.open++
+    res.on('close', () => {
+      live.open--
+      live.lastAt = Date.now()
+    })
+  }
+
+  private forget(sid: string): void {
+    this.sessions.delete(sid)
+    this.activeSessions.delete(sid)
+    this.liveness.delete(sid)
+  }
+
+  /**
+   * Close every open session for a device. The client may re-initialize;
+   * use a policy deny rule to keep it out.
+   */
+  async closeSessionsForDevice(deviceId: string): Promise<number> {
+    const sids = [...this.activeSessions]
+      .filter(([, ctx]) => ctx.identity.deviceId === deviceId)
+      .map(([sid]) => sid)
+    for (const sid of sids) {
+      await this.sessions.get(sid)?.transport.close()
+      this.forget(sid)
+    }
+    return sids.length
+  }
+
+  /**
    * Start the proxy server.
    */
   async start(): Promise<void> {
@@ -355,7 +408,8 @@ export class MCPProxyServer {
     const headerSessionId = req.headers['mcp-session-id']
     const sessionId = Array.isArray(headerSessionId) ? headerSessionId[0] : headerSessionId
     const existing = sessionId ? this.sessions.get(sessionId) : undefined
-    if (existing) {
+    if (existing && sessionId) {
+      this.touch(sessionId, res)
       return existing.transport.handleRequest(req, res, parsedBody)
     }
 
@@ -377,21 +431,16 @@ export class MCPProxyServer {
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {
         this.sessions.set(sid, { server, transport })
+        this.touch(sid)
         void this.registerSessionForRequest(sid, req)
         logger.debug({ sessionId: sid }, 'Session initialized')
       },
-      onsessionclosed: (sid) => {
-        this.sessions.delete(sid)
-        this.activeSessions.delete(sid)
-      },
+      onsessionclosed: (sid) => this.forget(sid),
     })
 
     transport.onclose = () => {
       const sid = transport.sessionId
-      if (sid) {
-        this.sessions.delete(sid)
-        this.activeSessions.delete(sid)
-      }
+      if (sid) this.forget(sid)
     }
 
     await server.connect(transport)
