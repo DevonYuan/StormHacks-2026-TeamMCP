@@ -105,3 +105,34 @@ export function createDefaultPolicy(updatedBy: string): PolicyDocument {
     updatedBy,
   }
 }
+
+/**
+ * Return a copy of `policy` with `rule` appended. Does not mutate the input, so
+ * callers can persist the result atomically without a read-modify-write race.
+ */
+export function addPolicyRule(
+  policy: PolicyDocument,
+  rule: PolicyRule,
+  updatedBy: string
+): PolicyDocument {
+  return {
+    ...policy,
+    rules: [...policy.rules, rule],
+    updatedAt: Date.now(),
+    updatedBy,
+  }
+}
+
+/** Return a copy of `policy` with the rule matching `ruleId` removed (no-op if absent). */
+export function removePolicyRule(
+  policy: PolicyDocument,
+  ruleId: string,
+  updatedBy: string
+): PolicyDocument {
+  return {
+    ...policy,
+    rules: policy.rules.filter((r) => r.id !== ruleId),
+    updatedAt: Date.now(),
+    updatedBy,
+  }
+}

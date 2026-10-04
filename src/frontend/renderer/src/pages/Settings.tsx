@@ -31,8 +31,10 @@ async function load(prev: Snapshot): Promise<Snapshot> {
   const api = window.electronAPI
   if (!api) return EMPTY
   const [policy, servers, config] = await Promise.all([
-    api.policy.get().catch(() => prev.policy),
-    api.servers.getAll().catch(() => prev.servers),
+    // `null` = gateway unreachable; keep the last good value instead of editing
+    // an empty policy (which would wipe the bootstrap rules).
+    api.policy.get().then((p) => p ?? prev.policy).catch(() => prev.policy),
+    api.servers.getAll().then((s) => s ?? prev.servers).catch(() => prev.servers),
     api.config
       .get()
       .then((c) => c.gateway)
@@ -646,7 +648,7 @@ export default function Settings(): React.JSX.Element {
               <p className="text-body-small text-ink">Start the gateway to manage access and servers.</p>
             </Section>
           )}
-          {snap.policy && <Servers servers={snap.servers} busy={busy} act={act} />}
+          <Servers servers={snap.servers} busy={busy} act={act} />
           {snap.config && <Privacy config={snap.config} busy={busy} act={act} onNotice={setNotice} />}
           {snap.config && <Network key={snap.config.port} config={snap.config} busy={busy} act={act} />}
         </div>

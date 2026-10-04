@@ -19,7 +19,12 @@ import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
 import { getTailnetDevices, getTailscaleWhois } from './auth/tailscale.js'
 import { ServerConfigSchema, TransportType } from '../shared/protocol.js'
-import { PolicyDocumentSchema } from '../shared/policy.js'
+import {
+  PolicyDocumentSchema,
+  PolicyRuleSchema,
+  addPolicyRule,
+  removePolicyRule,
+} from '../shared/policy.js'
 import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
 import { normalizePeerUrl, peerHost } from '../shared/peer.js'
 import { resolveHealthStatus } from './health.js'
@@ -324,7 +329,7 @@ export class Gateway {
         return this.handlePeersApi(req, res, id, ctx)
 
       case 'policy':
-        return this.handlePolicyApi(req, res, ctx)
+        return this.handlePolicyApi(req, res, id, action, ctx)
 
       case 'activity':
         return this.handleActivityApi(req, res, url, id, ctx)
@@ -618,8 +623,44 @@ export class Gateway {
   private async handlePolicyApi(
     req: IncomingMessage,
     res: ServerResponse,
+    id: string | undefined,
+    action: string | undefined,
     ctx: HttpContext
   ): Promise<void> {
+    // /api/policy/rules        POST   — append one rule
+    // /api/policy/rules/:id    DELETE — remove one rule
+    // Mutating a single rule server-side is atomic, unlike GET + PUT from the
+    // caller (which can silently drop a concurrent change).
+    if (id === 'rules') {
+      if (!action && req.method === 'POST') {
+        const rule = PolicyRuleSchema.parse(await readJson(req))
+        const policy = addPolicyRule(ctx.repos.policy.get(), rule, 'ui')
+        ctx.repos.policy.set(policy)
+        ctx.policyEngine.updatePolicy(policy)
+        sendJson(res, 201, { success: true, policy })
+        return
+      }
+      if (action && req.method === 'DELETE') {
+        const existing = ctx.repos.policy.get()
+        if (!existing.rules.some((r) => r.id === action)) {
+          sendJson(res, 404, { error: `Rule not found: ${action}` })
+          return
+        }
+        const policy = removePolicyRule(existing, action, 'ui')
+        ctx.repos.policy.set(policy)
+        ctx.policyEngine.updatePolicy(policy)
+        sendJson(res, 200, { success: true, policy })
+        return
+      }
+      sendJson(res, 405, { error: 'Method Not Allowed' })
+      return
+    }
+
+    if (id) {
+      sendJson(res, 404, { error: 'Not Found' })
+      return
+    }
+
     if (req.method === 'GET') {
       sendJson(res, 200, ctx.repos.policy.get())
       return

@@ -265,9 +265,11 @@ function App(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="grid h-screen grid-cols-shell grid-rows-shell">
+    <div className="grid h-screen grid-cols-shell grid-rows-shell overflow-hidden">
       <Sidebar page={page} onPage={setPage} />
-      <main className="overflow-y-auto">
+      {/* min-h-0 lets the 1fr row shrink so this pane scrolls instead of the
+          grid growing past the (overflow-hidden) window. */}
+      <main className="min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
           <TopBar />
           {page === 'Network' ? (
