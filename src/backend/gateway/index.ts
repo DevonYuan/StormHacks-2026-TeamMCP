@@ -117,6 +117,13 @@ export class Gateway {
 
     // Initialize MCP client manager
     const clientManager = new MCPClientManager(config)
+    // Host Disconnect closes our outbound session. Drop the registration so the
+    // sidebar and Connected peers stop showing it, and do not reconnect.
+    clientManager.on('peerLost', (serverId: string) => {
+      if (repos.servers.delete(serverId)) {
+        logger.info({ serverId }, 'Removed peer after the host closed the session')
+      }
+    })
 
     // Connect to registered servers
     const servers = repos.servers.getEnabled()

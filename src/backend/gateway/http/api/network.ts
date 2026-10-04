@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Logger } from 'pino'
 import type { ShareInfo } from '../../../shared/types.js'
-import { normalizePeerUrl, peerHost } from '../../../shared/peer.js'
-import { TransportType } from '../../../shared/protocol.js'
+import { normalizePeerUrl, PEER_DESCRIPTION, peerHost } from '../../../shared/peer.js'
+import { TransportType, type ServerConfig } from '../../../shared/protocol.js'
 import { getTailnetDevices, getTailscaleWhois } from '../../auth/tailscale.js'
 import type { HttpContext } from '../context.js'
 import { readJson, sendJson } from '../response.js'
@@ -156,38 +157,49 @@ export async function handlePeersApi(
     }
 
     const host = peerHost(url)
-    const created = repos.servers.create({
+    const now = Date.now()
+    // Handshake against an in-memory config. Nothing is listed under Connected peers
+    // until the session is actually up — a failed attempt must not flash into the UI.
+    const draft: ServerConfig = {
+      id: randomUUID(),
       name: `peer:${host}`,
       transport: TransportType.StreamableHttp,
       url,
       enabled: true,
-      description: 'Remote Team MCP Gateway peer',
-    })
+      description: PEER_DESCRIPTION,
+      createdAt: now,
+      updatedAt: now,
+    }
 
     try {
-      await clientManager.connect(created)
-      repos.health.recordSuccess(created.id, 0)
+      await clientManager.connect(draft)
     } catch (error) {
-      await clientManager.disconnect(created.id).catch(() => undefined)
-      repos.servers.delete(created.id)
+      await clientManager.disconnect(draft.id).catch(() => undefined)
       sendJson(res, 502, {
         error: `Could not reach ${host}: ${error instanceof Error ? error.message : String(error)}`,
       })
       return
     }
 
-    const tools = (clientManager.getConnection(created.id)?.tools ?? []).map(tool => ({
+    if (clientManager.getConnection(draft.id)?.status !== 'connected') {
+      await clientManager.disconnect(draft.id).catch(() => undefined)
+      sendJson(res, 502, { error: `Could not reach ${host}: connection closed` })
+      return
+    }
+
+    const tools = (clientManager.getConnection(draft.id)?.tools ?? []).map(tool => ({
       name: tool.name,
       description: tool.description,
     }))
 
     if (probe) {
-      await clientManager.disconnect(created.id)
-      repos.servers.delete(created.id)
+      await clientManager.disconnect(draft.id)
       sendJson(res, 200, { success: true, probe: true, url, tools })
       return
     }
 
+    const created = repos.servers.save(draft)
+    repos.health.recordSuccess(created.id, 0)
     sendJson(res, 201, { success: true, url, tools, server: created })
     return
   }

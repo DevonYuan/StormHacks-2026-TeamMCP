@@ -89,7 +89,7 @@ const config: Config = {
         },
       },
 
-      /* Font families — stacks are defined in globals.css (all monospace). */
+      /* Font families — stacks are defined in globals.css (Poppins for UI, mono for code). */
       fontFamily: {
         sans: ["var(--font-body)"],
         body: ["var(--font-body)"],

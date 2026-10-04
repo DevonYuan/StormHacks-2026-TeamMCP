@@ -8,7 +8,7 @@
  * Design tokens — single source of truth
  * ----------------------------------------------------------------------------
  * Two themes, toggled by the `dark` class on <html>:
- *   - Light (default): the original Team MCP warm-neutral palette.
+ *   - Light (default): cool slate canvas, hsl(210, 40%, 96%).
  *   - Dark: based on Variant "CORE.OS Fleet Manager"
  *     https://variant.com/shared/4b02b92a-fbf6-4125-aa28-bf51d99a84bc
  * Components only reference semantic tokens (section 2), so they restyle
@@ -35,12 +35,12 @@
    *    These are the only place the literal design values live.
    * ---------------------------------------------------------------------- */
   /* Light theme */
-  --mcp-paper: 45 20% 96%; /* #F7F6F3 — light canvas */
+  --mcp-paper: 210 40% 96%; /* hsl(210, 40%, 96%) — light canvas */
   --mcp-ink: 0 0% 7%; /* #111111 — light neutral, blended over paper */
   --mcp-denim: 225 26% 33%; /* #3F4A6B */
   --mcp-orange: 19 80% 54%; /* #E8692C */
   --mcp-cream: 33 60% 97%; /* #FCF8F3 — sidebar, matches the logo background */
-  --mcp-ivory: 36 100% 99%; /* #FFFDFA — app canvas, a step lighter than the sidebar */
+  --mcp-ivory: 210 40% 96%; /* hsl(210, 40%, 96%) — app canvas */
 
   /* Dark theme */
   --mcp-night: 224 71% 4%; /* #030712 — dark canvas */
@@ -101,13 +101,13 @@
   --nav-active-shadow: 0 1px 2px color-mix(in srgb, var(--color-shadow) 5%, transparent);
 
   /* ------------------------------------------------------------------------
-  * 3. Typography — family stacks consumed by tailwind.config.mts.
-   *    The whole UI is monospace. These are OS-installed fonts (Consolas on
-   *    Windows, Menlo/Monaco on macOS), so nothing is bundled.
+   * 3. Typography — family stacks consumed by tailwind.config.mts.
+   *    UI text is Poppins (loaded in main.tsx). Code, IPs, and kbd stay
+   *    monospace via --font-mono.
    * ---------------------------------------------------------------------- */
   --font-mono: Consolas, Menlo, Monaco, "Courier New", monospace;
-  --font-body: var(--font-mono);
-  --font-heading: var(--font-mono);
+  --font-body: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Poppins", ui-sans-serif, system-ui, sans-serif;
 
   /* ------------------------------------------------------------------------
    * 4. Radius & layout.

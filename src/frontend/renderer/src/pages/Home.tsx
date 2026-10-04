@@ -570,7 +570,7 @@ export default function Home(): React.JSX.Element {
           <span
             className={`size-1.5 rounded-full ${available ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
           />
-          {available ? 'Live · updates every 2s' : 'Read-only · open the desktop app to connect'}
+          {available ? 'Live' : 'Read-only · open the desktop app to connect'}
         </div>
       </div>
 
