@@ -211,8 +211,9 @@ const LOCAL_DEVICE_IDS = new Set(['local-dev-device'])
 
 const MACHINE_STATUS_RANK: Record<MachineStatus, number> = {
   connected: 0,
-  denied: 1,
-  offline: 2,
+  disconnected: 1,
+  denied: 2,
+  offline: 3,
 }
 
 /** Build a policy identity from a tailnet node so we can resolve its access. */
@@ -238,13 +239,13 @@ export function blockRuleId(deviceId: string): string {
 }
 
 /**
- * `online` is a live signal when known (tailnet nodes); `null` falls back to
- * recent activity (identities seen only in the log).
+ * `live` is the reachability status when known (tailnet nodes); `null` falls
+ * back to recent activity (identities seen only in the log).
  */
 function machineStatus(
   identity: Identity,
   entry: ActivityEntry | undefined,
-  online: boolean | null,
+  live: Exclude<MachineStatus, 'denied'> | null,
   policy: PolicyDocument,
   allServerIds: string[],
   now: number
@@ -256,9 +257,10 @@ function machineStatus(
   }
   const allowed = accessibleServers(policy, identity, allServerIds)
   if (allServerIds.length > 0 && allowed.length === 0) return 'denied'
-  if (online !== null) return online ? 'connected' : 'offline'
+  if (live !== null) return live
+  // Seen only in the activity log: reachability unknown, so never 'offline'.
   if (entry && now - entry.timestamp <= ONLINE_WINDOW_MS) return 'connected'
-  return 'offline'
+  return 'disconnected'
 }
 
 /**
@@ -293,11 +295,12 @@ export function toMachines(
       if (key) claimed.add(key)
     }
 
-    // A peer counts as connected only while Tailscale sees it AND either its own
-    // gateway answers /health or it holds an open session on ours.
-    const online = node.self
+    // Offline: Tailscale can't see it. Connected: its gateway answers /health or
+    // it holds a live session on ours (Self: our gateway runs). Else disconnected.
+    const linked = node.self
       ? Boolean(status?.running)
-      : node.online && (Boolean(node.gatewayUp) || (node.sessions ?? 0) > 0)
+      : Boolean(node.gatewayUp) || (node.sessions ?? 0) > 0
+    const live = !node.online ? 'offline' : linked ? 'connected' : 'disconnected'
     const ip = node.ips[0]
     const gatewayId =
       node.self && status ? `${status.boundAddress}:${status.port}` : node.stableId ?? node.id ?? ''
@@ -309,7 +312,7 @@ export function toMachines(
       subtitle: [node.user, tailnetName].filter(Boolean).join(' · ') || 'Peer',
       ip: ip ?? (node.self ? status?.boundAddress ?? '—' : '—'),
       gatewayId: gatewayId || '—',
-      status: machineStatus(identity, entry, online, policy, allServerIds, now),
+      status: machineStatus(identity, entry, live, policy, allServerIds, now),
       badge: node.self ? 'Local' : node.tags[0] ?? 'Peer',
       lastSeenMs: entry?.timestamp ?? parseLastSeen(node.lastSeen),
       deviceId: node.id,

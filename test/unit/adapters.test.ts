@@ -362,9 +362,25 @@ describe('adapters', () => {
         (m) => m.id === 'tailnet:node-1'
       )!
 
-    it('is offline when Tailscale is up but there is no gateway and no session', () => {
-      expect(peerStatus({ online: true }).status).toBe('offline')
-      expect(peerStatus({ online: true, gatewayUp: false, sessions: 0 }).status).toBe('offline')
+    it('is disconnected when on the tailnet with no gateway and no session', () => {
+      expect(peerStatus({ online: true }).status).toBe('disconnected')
+      expect(peerStatus({ online: true, gatewayUp: false, sessions: 0 }).status).toBe('disconnected')
+    })
+
+    it('is offline when Tailscale cannot see the device', () => {
+      expect(peerStatus({ online: false }).status).toBe('offline')
+    })
+
+    it('marks Self disconnected while our gateway is stopped', () => {
+      const machines = toMachines(
+        tailnet({ self: tDevice({ id: 'self', self: true }) }),
+        { ...status, running: false },
+        [],
+        allowAll,
+        ['s1'],
+        now
+      )
+      expect(machines[0].status).toBe('disconnected')
     })
 
     it('is connected while their gateway answers or they hold a session on ours', () => {

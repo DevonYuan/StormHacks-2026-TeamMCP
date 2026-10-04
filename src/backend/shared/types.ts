@@ -56,7 +56,11 @@ export interface Device {
 }
 
 /** Status shown for a row on the Machines page. */
-export type MachineStatus = 'connected' | 'offline' | 'denied'
+/**
+ * connected: on the tailnet and their gateway is up or they use ours.
+ * disconnected: on the tailnet but neither. offline: Tailscale can't see them.
+ */
+export type MachineStatus = 'connected' | 'disconnected' | 'offline' | 'denied'
 
 /** A machine row: this host or a tailnet peer, merged with gateway activity. */
 export interface Machine {

@@ -15,6 +15,7 @@ type SortKey = 'name' | 'ip' | 'gatewayId' | 'status'
 const filters: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'All machines' },
   { id: 'connected', label: 'Connected' },
+  { id: 'disconnected', label: 'Disconnected' },
   { id: 'offline', label: 'Offline' },
   { id: 'denied', label: 'Denied' }
 ]
@@ -29,11 +30,12 @@ const sortLabel: Record<SortKey, string> = {
 
 const statusLabel: Record<MachineStatus, string> = {
   connected: 'Connected',
+  disconnected: 'Disconnected',
   offline: 'Offline',
   denied: 'Denied'
 }
 
-const statusRank: Record<MachineStatus, number> = { connected: 0, denied: 1, offline: 2 }
+const statusRank: Record<MachineStatus, number> = { connected: 0, disconnected: 1, denied: 2, offline: 3 }
 
 function compareMachines(sortKey: SortKey, a: Machine, b: Machine): number {
   if (sortKey === 'status') return statusRank[a.status] - statusRank[b.status] || a.name.localeCompare(b.name)
@@ -138,10 +140,12 @@ function StatCard({
 function StatusCell({ status }: { status: MachineStatus }): React.JSX.Element {
   const dot =
     status === 'connected'
-      ? 'bg-status-online status-glow-online motion-safe:animate-breathe'
-      : status === 'denied'
-        ? 'bg-status-blocked'
-        : 'bg-status-offline'
+      ? 'bg-green-500 shadow-[0_0_8px] shadow-green-500/50 motion-safe:animate-breathe'
+      : status === 'disconnected'
+        ? 'bg-amber-400'
+        : status === 'denied'
+          ? 'bg-status-blocked'
+          : 'bg-red-500'
   return (
     <div className="flex items-center gap-2">
       <span className={`size-2 rounded-full ${dot}`} />
@@ -222,7 +226,7 @@ function RowMenu({ machine, actions }: { machine: Machine; actions: RowAction[] 
 }
 
 export default function Machines(): React.JSX.Element {
-  const { machines, authFailures, status, error, refresh: refreshData, addPeer, setBlocked, disconnect } =
+  const { machines, authFailures, status, error, refresh: refreshData, setBlocked, disconnect } =
     useNetworkData()
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
   const [filter, setFilter] = useState<StatusFilter>('all')
@@ -294,20 +298,16 @@ export default function Machines(): React.JSX.Element {
         onSelect: () => run(copy('Gateway id', machine.gatewayId)),
       },
       {
-        label: 'Connect to their gateway',
-        hidden: !peer || !machine.mcpUrl,
+        label: 'Disconnect',
+        hidden: !peer,
+        danger: true,
         onSelect: () =>
           run(async () => {
-            const result = await addPeer(machine.mcpUrl ?? '')
-            if (!result.success) throw new Error(`Couldn't reach ${machine.name}'s gateway`)
-            return `Connected to ${machine.name}'s gateway`
+            const closed = await disconnect(machine.deviceId)
+            return closed
+              ? `Disconnected ${machine.name} (${closed} session${closed === 1 ? '' : 's'})`
+              : `${machine.name} has no open sessions on this gateway`
           }),
-      },
-      {
-        label: `Disconnect session${machine.sessions === 1 ? '' : 's'} (${machine.sessions})`,
-        hidden: !peer || machine.sessions === 0,
-        onSelect: () =>
-          run(async () => `Closed ${await disconnect(machine.deviceId)} session(s) for ${machine.name}`),
       },
       {
         label: machine.blocked ? 'Unblock' : 'Block',
