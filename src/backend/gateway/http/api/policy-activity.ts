@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ActivityQuery } from '../../../shared/activity.js'
-import { PolicyDocumentSchema } from '../../../shared/policy.js'
+import {
+  PolicyDocumentSchema,
+  PolicyRuleSchema,
+  addPolicyRule,
+  removePolicyRule,
+} from '../../../shared/policy.js'
 import type { HttpContext } from '../context.js'
 import { readJson, sendJson } from '../response.js'
 
@@ -8,8 +13,44 @@ import { readJson, sendJson } from '../response.js'
 export async function handlePolicyApi(
   req: IncomingMessage,
   res: ServerResponse,
+  id: string | undefined,
+  action: string | undefined,
   ctx: HttpContext,
 ): Promise<void> {
+  // /api/policy/rules        POST   — append one rule
+  // /api/policy/rules/:id    DELETE — remove one rule
+  // Mutating a single rule server-side is atomic, unlike GET + PUT from the
+  // caller (which can silently drop a concurrent change).
+  if (id === 'rules') {
+    if (!action && req.method === 'POST') {
+      const rule = PolicyRuleSchema.parse(await readJson(req))
+      const policy = addPolicyRule(ctx.repos.policy.get(), rule, 'ui')
+      ctx.repos.policy.set(policy)
+      ctx.policyEngine.updatePolicy(policy)
+      sendJson(res, 201, { success: true, policy })
+      return
+    }
+    if (action && req.method === 'DELETE') {
+      const existing = ctx.repos.policy.get()
+      if (!existing.rules.some(r => r.id === action)) {
+        sendJson(res, 404, { error: `Rule not found: ${action}` })
+        return
+      }
+      const policy = removePolicyRule(existing, action, 'ui')
+      ctx.repos.policy.set(policy)
+      ctx.policyEngine.updatePolicy(policy)
+      sendJson(res, 200, { success: true, policy })
+      return
+    }
+    sendJson(res, 405, { error: 'Method Not Allowed' })
+    return
+  }
+
+  if (id) {
+    sendJson(res, 404, { error: 'Not Found' })
+    return
+  }
+
   if (req.method === 'GET') {
     sendJson(res, 200, ctx.repos.policy.get())
     return

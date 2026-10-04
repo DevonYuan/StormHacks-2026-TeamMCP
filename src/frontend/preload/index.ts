@@ -60,7 +60,7 @@ const api = {
 
   // Server management
   servers: {
-    getAll: () => invoke<[], ServerConfig[]>('servers:get'),
+    getAll: () => invoke<[], ServerConfig[] | null>('servers:get'),
     create: (server: Omit<ServerConfig, 'id' | 'createdAt' | 'updatedAt'>) =>
       invoke<[Omit<ServerConfig, 'id' | 'createdAt' | 'updatedAt'>], { success: boolean; server: ServerConfig }>(
         'servers:create',
@@ -79,7 +79,7 @@ const api = {
 
   // Policy management
   policy: {
-    get: () => invoke<[], PolicyDocument>('policy:get'),
+    get: () => invoke<[], PolicyDocument | null>('policy:get'),
     update: (policy: PolicyDocument) => invoke<[PolicyDocument], { success: boolean }>('policy:update', policy),
     addRule: (rule: PolicyRule) => invoke<[PolicyRule], { success: boolean }>('policy:addRule', rule),
     removeRule: (ruleId: string) => invoke<[string], { success: boolean }>('policy:removeRule', ruleId),
@@ -107,6 +107,10 @@ const api = {
     add: (address: string, probe = false) =>
       invoke<[string, boolean], AddPeerResult>('peers:add', address, probe),
     remove: (id: string) => invoke<[string], { success: boolean }>('peers:remove', id),
+  },
+  sessions: {
+    disconnect: (deviceId: string) =>
+      invoke<[string], { success: boolean; closed: number }>('sessions:disconnect', deviceId),
   },
 
   // Health monitoring

@@ -31,6 +31,7 @@ import {
   toHost,
   toMachines,
   toServers,
+  blockRuleId,
 } from './adapters'
 
 const POLL_MS = 2000
@@ -98,6 +99,10 @@ export interface NetworkData {
   /** Validate a peer address without keeping it registered. */
   probePeer: (address: string) => Promise<AddPeerResult>
   removePeer: (id: string) => Promise<{ success: boolean }>
+  /** Add / remove a high-priority deny rule for one tailnet device. */
+  setBlocked: (machine: Machine, blocked: boolean) => Promise<void>
+  /** Close a device's open sessions on this gateway (it may reconnect unless blocked). */
+  disconnect: (deviceId: string) => Promise<number>
 }
 
 const NetworkDataContext = createContext<NetworkData | null>(null)
@@ -210,6 +215,29 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         const api = window.electronAPI
         if (!api) throw new Error('Open the desktop app to remove a peer')
         return api.peers.remove(id)
+      },
+      setBlocked: async (machine: Machine, blocked: boolean) => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to change access')
+        const id = blockRuleId(machine.deviceId)
+        await (blocked
+          ? api.policy.addRule({
+              id,
+              name: `Block ${machine.name}`,
+              identities: [{ user: '', device: '', deviceId: machine.deviceId, tailnet: '' }],
+              effect: 'deny',
+              priority: 1000,
+              description: 'Added from the Machines page.',
+            })
+          : api.policy.removeRule(id))
+        await reload()
+      },
+      disconnect: async (deviceId: string) => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to disconnect a device')
+        const { closed } = await api.sessions.disconnect(deviceId)
+        await reload()
+        return closed
       },
     }
   }, [snapshot, error, reload])

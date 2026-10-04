@@ -6,14 +6,7 @@ import { IPC_CHANNELS } from '../../shared/ipc.js'
 interface PolicyActivityIpcDependencies {
   gatewayFetch<T>(path: string, init?: RequestInit): Promise<T>
   gatewayFetchOr<T>(path: string, fallback: T, init?: RequestInit): Promise<T>
-}
-
-const EMPTY_POLICY: PolicyDocument = {
-  version: 1,
-  defaultEffect: 'deny',
-  rules: [],
-  updatedAt: 0,
-  updatedBy: 'system',
+  ensureGatewayRunning(): Promise<void>
 }
 
 const EMPTY_ACTIVITY_STATS: ActivityStats = {
@@ -34,12 +27,16 @@ const EMPTY_ACTIVITY_STATS: ActivityStats = {
 export function registerPolicyActivityIpcHandlers({
   gatewayFetch,
   gatewayFetchOr,
+  ensureGatewayRunning,
 }: PolicyActivityIpcDependencies): void {
   ipcMain.handle(IPC_CHANNELS.POLICY_GET, async () => {
-    return gatewayFetchOr<PolicyDocument>('/api/policy', EMPTY_POLICY)
+    // null means "gateway unreachable". The UI keeps its last good policy
+    // instead of editing an empty one (which would wipe the bootstrap rules).
+    return gatewayFetchOr<PolicyDocument | null>('/api/policy', null)
   })
 
   ipcMain.handle(IPC_CHANNELS.POLICY_UPDATE, async (_event, policy: PolicyDocument) => {
+    await ensureGatewayRunning()
     return gatewayFetch<{ success: boolean; policy: PolicyDocument }>('/api/policy', {
       method: 'PUT',
       body: JSON.stringify(policy),
@@ -47,31 +44,20 @@ export function registerPolicyActivityIpcHandlers({
   })
 
   ipcMain.handle(IPC_CHANNELS.POLICY_ADD_RULE, async (_event, rule: PolicyRule) => {
-    const policy = await gatewayFetch<PolicyDocument>('/api/policy')
-    const updated: PolicyDocument = {
-      ...policy,
-      rules: [...policy.rules, rule],
-      updatedAt: Date.now(),
-      updatedBy: 'ui',
-    }
-    await gatewayFetch('/api/policy', {
-      method: 'PUT',
-      body: JSON.stringify(updated),
+    await ensureGatewayRunning()
+    // Server-side append: one atomic write instead of GET-then-PUT, which
+    // could drop a concurrent rule change.
+    await gatewayFetch('/api/policy/rules', {
+      method: 'POST',
+      body: JSON.stringify(rule),
     })
     return { success: true }
   })
 
   ipcMain.handle(IPC_CHANNELS.POLICY_REMOVE_RULE, async (_event, ruleId: string) => {
-    const policy = await gatewayFetch<PolicyDocument>('/api/policy')
-    const updated: PolicyDocument = {
-      ...policy,
-      rules: policy.rules.filter(rule => rule.id !== ruleId),
-      updatedAt: Date.now(),
-      updatedBy: 'ui',
-    }
-    await gatewayFetch('/api/policy', {
-      method: 'PUT',
-      body: JSON.stringify(updated),
+    await ensureGatewayRunning()
+    await gatewayFetch(`/api/policy/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'DELETE',
     })
     return { success: true }
   })
@@ -91,6 +77,7 @@ export function registerPolicyActivityIpcHandlers({
   })
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_PRUNE, async (_event, olderThanMs: number) => {
+    await ensureGatewayRunning()
     return gatewayFetch<{ success: boolean; count: number }>('/api/activity/prune', {
       method: 'POST',
       body: JSON.stringify({ olderThanMs }),

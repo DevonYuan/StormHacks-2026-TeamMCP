@@ -145,7 +145,7 @@ export function ExposeModal({
             </span>
             <button
               onClick={() => void stopGateway()}
-              className="rounded-lg border border-border px-2.5 py-1.5 hover:text-ink"
+              className="rounded-lg border border-red-600/30 bg-red-600/5 px-2.5 py-1.5 text-red-600 transition hover:bg-red-600/10 hover:border-red-600/50 active:scale-95"
             >
               Stop gateway
             </button>

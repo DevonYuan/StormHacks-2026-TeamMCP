@@ -105,7 +105,21 @@ export class GatewayHttpRouter {
       case 'peers':
         return handlePeersApi(req, res, id, ctx)
       case 'policy':
-        return handlePolicyApi(req, res, ctx)
+        return handlePolicyApi(req, res, id, action, ctx)
+      // /api/sessions/:deviceId — close a device's open MCP sessions.
+      case 'sessions': {
+        if (req.method !== 'DELETE') {
+          sendJson(res, 405, { error: 'Method Not Allowed' })
+          return
+        }
+        if (!id) {
+          sendJson(res, 400, { error: 'Missing device id' })
+          return
+        }
+        const closed = await ctx.proxyServer.closeSessionsForDevice(decodeURIComponent(id))
+        sendJson(res, 200, { success: true, closed })
+        return
+      }
       case 'activity':
         return handleActivityApi(req, res, url, id, ctx)
       case 'health':

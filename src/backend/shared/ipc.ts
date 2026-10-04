@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   SHARE_GET: 'share:get',
   PEERS_ADD: 'peers:add',
   PEERS_REMOVE: 'peers:remove',
+  SESSIONS_DISCONNECT: 'sessions:disconnect',
 
   EVENT_ACTIVITY: 'event:activity',
   EVENT_SERVER_HEALTH: 'event:serverHealth',

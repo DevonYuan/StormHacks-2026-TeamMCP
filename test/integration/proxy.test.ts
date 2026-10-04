@@ -196,6 +196,34 @@ describe('MCP proxy (integration)', () => {
     expect(entry.errorCode).toBe(403)
   })
 
+  it('closes every session for a device on disconnect', async () => {
+    await client.listTools() // session auth registers asynchronously; let it land
+
+    const counts = proxyServer.sessionsByDevice()
+    expect(counts.size).toBe(1) // every test client is the same loopback device
+    const [[deviceId]] = [...counts]
+
+    expect(await proxyServer.closeSessionsForDevice('someone-else')).toBe(0)
+    expect(await proxyServer.closeSessionsForDevice(deviceId)).toBeGreaterThanOrEqual(1)
+    expect(proxyServer.sessionsByDevice().size).toBe(0)
+    await expect(client.listTools()).rejects.toThrow()
+  })
+
+  it('stops counting a session once its client goes idle', async () => {
+    await client.listTools()
+    const [[deviceId]] = [...proxyServer.sessionsByDevice()]
+    await proxyServer.closeSessionsForDevice(deviceId) // drop sessions left by earlier tests
+
+    const other = new Client({ name: 'idle-it', version: '1.0.0' }, { capabilities: {} })
+    await other.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)))
+    await other.listTools()
+    await other.close() // no DELETE: the session stays registered server-side
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(proxyServer.sessionsByDevice().get(deviceId)).toBe(1)
+    expect(proxyServer.sessionsByDevice(Date.now() + 3 * 60 * 1000).size).toBe(0)
+  })
+
   it('returns empty resource and prompt lists for a tools-only server', async () => {
     const resources = await client.listResources()
     expect(resources.resources).toEqual([])

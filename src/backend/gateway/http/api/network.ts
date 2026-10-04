@@ -7,6 +7,17 @@ import { getTailnetDevices, getTailscaleWhois } from '../../auth/tailscale.js'
 import type { HttpContext } from '../context.js'
 import { readJson, sendJson } from '../response.js'
 
+/** True when a Team MCP gateway answers `/health` at `ip:port`. */
+async function probeGateway(ip: string, port: number): Promise<boolean> {
+  try {
+    const host = ip.includes(':') ? `[${ip}]` : ip
+    const res = await fetch(`http://${host}:${port}/health`, { signal: AbortSignal.timeout(1500) })
+    return res.ok && ((await res.json()) as { status?: string }).status === 'ok'
+  } catch {
+    return false
+  }
+}
+
 /** Resolve local Tailscale state, device listings, or a node by IP. */
 export async function handleTailscaleApi(
   req: IncomingMessage,
@@ -28,10 +39,23 @@ export async function handleTailscaleApi(
     }
     try {
       const nodes = await getTailnetDevices(ctx.config)
+      const sessions = ctx.proxyServer.sessionsByDevice()
+      // ponytail: probes every online peer on each poll, assuming they use our port;
+      // cache results if the tailnet grows past a handful of machines.
+      const devices = await Promise.all(
+        nodes
+          .filter(node => !node.self)
+          .map(async node => ({
+            ...node,
+            sessions: sessions.get(node.id) ?? 0,
+            gatewayUp:
+              node.online && node.ips[0] ? await probeGateway(node.ips[0], ctx.config.port) : false,
+          })),
+      )
       sendJson(res, 200, {
         available: true,
         self: nodes.find(node => node.self) ?? null,
-        devices: nodes.filter(node => !node.self),
+        devices,
       })
     } catch (error) {
       logger.warn({ error }, 'Failed to enumerate tailnet devices')
