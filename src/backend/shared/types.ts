@@ -22,13 +22,16 @@ export interface Host {
 
 export interface Server {
   id: string
-  transport: 'stdio' | 'http'
+  /** Friendly display name from the server config; fall back to `id`. */
+  name?: string
+  transport: 'stdio' | 'streamable-http' | 'sse'
   command: string
   running: boolean
   tools: number
   callsPerMin: number
-  cpu: number
-  memMb: number
+  /** null when the backend does not measure per-server resources. */
+  cpu: number | null
+  memMb: number | null
 }
 
 export interface Device {
@@ -58,4 +61,24 @@ export interface ActivityEvent {
   tool: string
   outcome: 'allowed' | 'denied'
   ms: number
+}
+
+/** Aggregate gateway metrics derived from the activity log. */
+export interface GatewayMetrics {
+  /** 50th percentile upstream call duration, ms. */
+  p50: number
+  /** 95th percentile upstream call duration, ms. */
+  p95: number
+  /** Denied calls in the last 24 hours. */
+  denied24h: number
+  /** Successful calls since local midnight. */
+  proxiedToday: number
+}
+
+/** Local tailnet info surfaced by the gateway (`/api/tailscale`). */
+export interface TailscaleInfo {
+  available: boolean
+  ip: string | null
+  hostname: string | null
+  dnsName: string | null
 }

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import Home from './pages/Home'
-import { devices, host, servers } from './mock'
+import { useNetworkData } from './data/NetworkData'
 
 type Page = 'Network' | 'Machines' | 'Settings'
 
+// Fixed order, used for the ⌘1/⌘2/⌘3 shortcuts.
+const PAGES: Page[] = ['Network', 'Machines', 'Settings']
+
 const isMac = navigator.userAgent.includes('Mac')
-const blocked = devices.filter((d) => d.status === 'blocked').length
-const online = devices.filter((d) => d.status === 'online').length
 
 function Icon({ page }: { page: Page }): React.JSX.Element {
   const common = {
@@ -43,14 +44,17 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
   )
 }
 
-const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
-  { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
-  { page: 'Machines', badge: { text: devices.length, alert: false } },
-  { page: 'Settings' }
-]
-
 function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
-  const [running, setRunning] = useState(true)
+  const { devices, servers, host, status, startGateway, stopGateway } = useNetworkData()
+  const running = status?.running ?? false
+  const blocked = devices.filter((d) => d.status === 'blocked').length
+  const online = devices.filter((d) => d.status === 'online').length
+
+  const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
+    { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
+    { page: 'Machines', badge: devices.length ? { text: devices.length, alert: false } : undefined },
+    { page: 'Settings' }
+  ]
 
   return (
     <aside className="row-span-2 flex flex-col border-r border-line bg-rail px-3 py-5">
@@ -114,11 +118,14 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
         <ul className="mt-2.5 flex flex-col gap-2">
           {servers.map((s) => (
             <li key={s.id} className="flex items-center gap-2.5 font-mono text-[12.5px]">
-              <span className={`size-1.5 rounded-full ${s.running ? 'bg-online' : 'bg-faint'}`} />
-              <span className={s.running ? 'text-ink' : 'text-muted'}>{s.id}</span>
-              <span className="ml-auto text-[11px] text-faint">{s.transport}</span>
+              <span className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-online' : 'bg-faint'}`} />
+              <span className={`truncate ${s.running ? 'text-ink' : 'text-muted'}`}>
+                {s.name ?? s.id}
+              </span>
+              <span className="ml-auto shrink-0 text-[11px] text-faint">{s.transport}</span>
             </li>
           ))}
+          {servers.length === 0 && <li className="text-[11px] text-faint">No servers registered</li>}
         </ul>
       </div>
 
@@ -128,9 +135,8 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
             className={`size-2 rounded-full ${running ? 'bg-online motion-safe:animate-breathe' : 'bg-faint'}`}
           />
           {running ? 'Gateway running' : 'Gateway paused'}
-          {/* ponytail: UI-only toggle until the gateway process exposes start/stop over IPC. */}
           <button
-            onClick={() => setRunning(!running)}
+            onClick={() => void (running ? stopGateway() : startGateway())}
             aria-label={running ? 'Pause gateway' : 'Start gateway'}
             className="ml-auto rounded-md p-1 text-muted hover:bg-black/[0.05] hover:text-ink"
           >
@@ -160,17 +166,18 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
 }
 
 function StatusBar(): React.JSX.Element {
+  const { host, servers, devices, tailscale, status } = useNetworkData()
   return (
     <footer className="flex h-8 items-center gap-5 border-t border-line bg-surface px-5 font-mono text-[11px] text-muted">
       <span className="flex items-center gap-1.5">
-        <span className="size-1.5 rounded-full bg-online" />
-        tailnet
+        <span className={`size-1.5 rounded-full ${tailscale.available ? 'bg-online' : 'bg-faint'}`} />
+        {tailscale.available ? 'tailnet' : 'local only'}
       </span>
       <span>{host.dns}</span>
       <span>
-        {host.sharedServers} servers · {devices.length} devices
+        {servers.length} servers · {devices.length} devices
       </span>
-      <span>uptime {host.uptime}</span>
+      <span>uptime {status?.running ? host.uptime : '—'}</span>
       <span className="ml-auto">v0.1.0</span>
     </footer>
   )
@@ -181,10 +188,10 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      const target = nav[Number(e.key) - 1]
+      const target = PAGES[Number(e.key) - 1]
       if ((e.metaKey || e.ctrlKey) && target) {
         e.preventDefault()
-        setPage(target.page)
+        setPage(target)
       }
     }
     window.addEventListener('keydown', onKey)
