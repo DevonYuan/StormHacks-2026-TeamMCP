@@ -58,4 +58,11 @@ export function registerNetworkIpcHandlers({
       method: 'DELETE',
     })
   })
+
+  ipcMain.handle(IPC_CHANNELS.SESSIONS_DISCONNECT, async (_event, deviceId: string) => {
+    return gatewayFetch<{ success: boolean; closed: number }>(
+      `/api/sessions/${encodeURIComponent(deviceId)}`,
+      { method: 'DELETE' },
+    )
+  })
 }

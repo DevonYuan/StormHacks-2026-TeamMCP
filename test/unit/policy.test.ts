@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { PolicyEngine, validatePolicy } from '../../src/backend/gateway/authz/policy.js'
-import { createDefaultPolicy, PolicyDocument, PolicyRule, Identity } from '../../src/backend/shared/policy.js'
+import {
+  createDefaultPolicy,
+  PolicyDocument,
+  PolicyRule,
+  Identity,
+  addPolicyRule,
+  removePolicyRule,
+} from '../../src/backend/shared/policy.js'
 
 const testIdentity: Identity = {
   user: 'alice@example.com',
@@ -263,3 +270,44 @@ describe('validatePolicy', () => {
     expect(result.errors.some(e => e.includes('duplicate id'))).toBe(true)
   })
 })
+describe('policy rule mutations', () => {
+  const basePolicy = (): PolicyDocument => ({
+    version: 1,
+    defaultEffect: 'deny',
+    rules: [{ id: 'rule-a', name: 'A', identities: [], effect: 'allow', priority: 10 }],
+    updatedAt: 0,
+    updatedBy: 'test',
+  })
+
+  const rule: PolicyRule = {
+    id: 'rule-b',
+    name: 'B',
+    identities: [],
+    effect: 'deny',
+    priority: 20,
+  }
+
+  it('appends a rule without mutating the input', () => {
+    const before = basePolicy()
+    const after = addPolicyRule(before, rule, 'ui')
+
+    expect(before.rules).toHaveLength(1)
+    expect(after.rules.map((r) => r.id)).toEqual(['rule-a', 'rule-b'])
+    expect(after.updatedBy).toBe('ui')
+    expect(after.updatedAt).toBeGreaterThan(0)
+  })
+
+  it('removes a rule and leaves the rest untouched', () => {
+    const before = addPolicyRule(basePolicy(), rule, 'ui')
+    const after = removePolicyRule(before, 'rule-a', 'ui')
+
+    expect(after.rules.map((r) => r.id)).toEqual(['rule-b'])
+    expect(after.updatedBy).toBe('ui')
+  })
+
+  it('removing an unknown rule is a no-op on the rule list', () => {
+    const after = removePolicyRule(basePolicy(), 'missing', 'ui')
+    expect(after.rules.map((r) => r.id)).toEqual(['rule-a'])
+  })
+})
+

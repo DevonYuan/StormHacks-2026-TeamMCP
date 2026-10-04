@@ -119,13 +119,13 @@ export class Gateway {
     // Connect to registered servers
     const servers = repos.servers.getEnabled()
     logger.info({ count: servers.length }, 'Connecting to registered MCP servers')
+    // Connect in the background: an unreachable upstream (e.g. an offline peer,
+    // whose TCP connect can hang for minutes) must not keep the gateway from listening.
     for (const server of servers) {
-      try {
-        await clientManager.connect(server)
-      } catch (error) {
+      clientManager.connect(server).catch((error) => {
         logger.error({ serverId: server.id, error }, 'Failed to connect to server')
         repos.health.recordFailure(server.id, error instanceof Error ? error.message : String(error))
-      }
+      })
     }
 
     // Start health checks

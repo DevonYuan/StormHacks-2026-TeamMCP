@@ -33,8 +33,10 @@ async function load(prev: Snapshot): Promise<Snapshot> {
   const api = window.electronAPI
   if (!api) return EMPTY
   const [policy, servers, config] = await Promise.all([
-    api.policy.get().catch(() => prev.policy),
-    api.servers.getAll().catch(() => prev.servers),
+    // `null` = gateway unreachable; keep the last good value instead of editing
+    // an empty policy (which would wipe the bootstrap rules).
+    api.policy.get().then((p) => p ?? prev.policy).catch(() => prev.policy),
+    api.servers.getAll().then((s) => s ?? prev.servers).catch(() => prev.servers),
     api.config
       .get()
       .then((c) => c.gateway)
@@ -64,9 +66,9 @@ function newRule(user: string, serverId: string, effect: 'allow' | 'deny'): Poli
 const inputClass =
   'rounded-lg border border-border bg-surface-raised px-3 py-2 text-body text-ink-emphasis outline-none placeholder:text-ink-muted focus:outline-2 focus:outline-ring disabled:opacity-50'
 const primaryButton =
-  'rounded-lg bg-brand px-4 py-2 text-button text-primary-foreground hover:opacity-90 disabled:opacity-40'
+  'rounded-lg bg-brand px-4 py-2 text-button text-primary-foreground transition hover:opacity-90 active:scale-95 disabled:opacity-40 disabled:active:scale-100'
 const secondaryButton =
-  'rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-body-small text-ink-emphasis hover:bg-surface-muted disabled:opacity-40'
+  'rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-body-small text-ink-emphasis transition hover:bg-surface-muted active:scale-95 disabled:opacity-40 disabled:active:scale-100'
 
 function Section({
   title,
@@ -790,7 +792,7 @@ export default function Settings(): React.JSX.Element {
               <p className="text-body-small text-ink">Start the gateway to manage access and servers.</p>
             </Section>
           )}
-          {snap.policy && <Servers servers={snap.servers} busy={busy} act={act} />}
+          <Servers servers={snap.servers} busy={busy} act={act} />
           {snap.config && <Privacy config={snap.config} busy={busy} act={act} onNotice={setNotice} />}
           {snap.config && <Network key={snap.config.port} config={snap.config} busy={busy} act={act} />}
         </div>

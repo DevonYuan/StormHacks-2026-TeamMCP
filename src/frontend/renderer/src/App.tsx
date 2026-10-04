@@ -130,28 +130,42 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
       {mode === 'server' ? (
         <div className="glass-card mt-auto rounded-xl p-3">
           <div className="flex items-center gap-2 text-body font-medium">
-            <span className={`size-2 rounded-full ${running ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`} />
+            <span
+              className={`size-2 rounded-full ${running ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
+            />
             {running ? 'Gateway running' : 'Gateway paused'}
             <button
               onClick={() => void (running ? stopGateway() : startGateway())}
               aria-label={running ? 'Pause gateway' : 'Start gateway'}
-              className="ml-auto rounded-md p-1 text-ink hover:bg-surface-muted hover:text-ink-emphasis"
+              className={`ml-auto rounded-md p-1 ${
+                running
+                  ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600'
+                  : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'
+              }`}
             >
               <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
                 {running ? <path d="M4 3h2.5v10H4zM9.5 3H12v10H9.5z" /> : <path d="M4.5 2.5v11L13 8z" />}
               </svg>
             </button>
           </div>
-          <div className="mt-1.5 font-mono text-caption text-ink tabular-nums">{host.ip}:{host.port}</div>
+          <div className="mt-1.5 font-mono text-caption text-ink tabular-nums">
+            {host.ip}:{host.port}
+          </div>
           <div className="mt-2.5 flex gap-3 text-body-small text-ink">
-            <span><span className="font-medium text-ink-emphasis tabular-nums">{online}</span> online</span>
-            <span><span className="font-medium text-status-blocked tabular-nums">{blocked}</span> blocked</span>
+            <span>
+              <span className="font-medium text-ink-emphasis tabular-nums">{online}</span> online
+            </span>
+            <span>
+              <span className="font-medium text-status-blocked tabular-nums">{blocked}</span> blocked
+            </span>
           </div>
         </div>
       ) : (
         <div className="glass-card mt-auto rounded-xl p-3">
           <div className="text-body font-medium text-ink-emphasis">Client mode</div>
-          <p className="mt-1 text-caption text-ink">Connect to a teammate’s exposed gateway to use their MCP servers.</p>
+          <p className="mt-1 text-caption text-ink">
+            Connect to a teammate’s exposed gateway to use their MCP servers.
+          </p>
         </div>
       )}
 
@@ -282,9 +296,9 @@ function App(): React.JSX.Element {
   if (!user) return <AuthPage />
 
   return (
-    <div className="grid h-screen grid-cols-shell grid-rows-shell">
+    <div className="grid h-screen grid-cols-shell grid-rows-shell overflow-hidden">
       <Sidebar page={page} onPage={setPage} />
-      <main className="overflow-y-auto">
+      <main className="min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
           <TopBar />
           {page === 'Network' ? (
