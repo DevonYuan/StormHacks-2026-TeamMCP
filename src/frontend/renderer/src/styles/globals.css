@@ -291,6 +291,14 @@
   box-shadow: 0 0 10px color-mix(in srgb, var(--color-status-online) 50%, transparent);
 }
 
+/* Onboarding slide swap: gentle fade + rise. */
+@keyframes onb-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 /* Dotted canvas behind the network tree. */
 @utility dot-grid {
   background-image: radial-gradient(var(--color-border) 1px, transparent 1px);

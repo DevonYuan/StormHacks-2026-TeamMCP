@@ -16,6 +16,7 @@ import type { ServerConfig } from '@shared/protocol'
 import type { Device } from '@shared/types'
 import { useAuth } from '../auth/AuthContext'
 import { useNetworkData } from '../data/NetworkData'
+import { showOnboarding } from '../components/Onboarding'
 
 interface Snapshot {
   policy: PolicyDocument | null
@@ -605,6 +606,9 @@ function AccountActivity(): React.JSX.Element {
           <div className="text-caption text-ink-muted uppercase">Current mode</div>
           <div className="mt-1 text-body font-medium capitalize text-ink-emphasis">{mode}</div>
         </div>
+        <button type="button" onClick={showOnboarding} className={secondaryButton}>
+          Replay onboarding
+        </button>
         <button
           type="button"
           onClick={signOut}

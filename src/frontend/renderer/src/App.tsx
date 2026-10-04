@@ -8,6 +8,7 @@ import type { AccountMode } from './auth/mockAuth'
 import { useNetworkData } from './data/NetworkData'
 import { ConnectModal } from './components/ConnectModal'
 import { ExposeModal } from './components/ExposeModal'
+import { Onboarding } from './components/Onboarding'
 
 type Page = 'Network' | 'Machines' | 'Settings'
 
@@ -311,6 +312,7 @@ function App(): React.JSX.Element {
         </div>
       </main>
       <StatusBar />
+      <Onboarding />
     </div>
   )
 }
