@@ -2,6 +2,7 @@
 node_modules/
 
 # Build output
+.vscode/
 dist/
 dist-electron/
 out/
@@ -53,6 +54,7 @@ coverage/
 .nyc_output/
 test-results/
 playwright-report/
+
 
 # Cache
 .cache/

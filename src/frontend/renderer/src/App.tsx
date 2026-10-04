@@ -2,9 +2,13 @@ import { useEffect, useState } from 'react'
 import Home from './pages/Home'
 import Machines from './pages/Machines'
 import Settings from './pages/Settings'
+import AuthPage from './pages/Auth'
+import { useAuth } from './auth/AuthContext'
+import type { AccountMode } from './auth/mockAuth'
 import { useNetworkData } from './data/NetworkData'
 import { ConnectModal } from './components/ConnectModal'
 import { ExposeModal } from './components/ExposeModal'
+import { Onboarding } from './components/Onboarding'
 
 type Page = 'Network' | 'Machines' | 'Settings'
 
@@ -13,6 +17,7 @@ const PAGES: Page[] = ['Network', 'Machines', 'Settings']
 
 const isMac = navigator.userAgent.includes('Mac')
 
+/** Render the navigation icon for the selected dashboard page. */
 function Icon({ page }: { page: Page }): React.JSX.Element {
   const common = {
     viewBox: '0 0 20 20',
@@ -48,8 +53,10 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
   )
 }
 
+/** Render navigation, gateway state, and the active demo profile. */
 function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
   const { devices, servers, host, status, opening, startGateway, stopGateway } = useNetworkData()
+  const { user, mode, signOut } = useAuth()
   const running = status?.running ?? false
   const blocked = devices.filter((d) => d.status === 'blocked').length
   const online = devices.filter((d) => d.status === 'online').length
@@ -121,49 +128,78 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
         </ul>
       </div>
 
-      <div className="glass-card mt-auto rounded-xl p-3">
-        <div className="flex items-center gap-2 text-body font-medium">
-          <span
-            className={`size-2 rounded-full ${
-              opening
-                ? 'bg-brand motion-safe:animate-pulse'
-                : running
-                  ? 'bg-status-online motion-safe:animate-breathe'
-                  : 'bg-status-offline'
-            }`}
-          />
-          {opening ? 'Opening gateway' : running ? 'Gateway running' : 'Gateway paused'}
+      {mode === 'server' ? (
+        <div className="glass-card mt-auto rounded-xl p-3">
+          <div className="flex items-center gap-2 text-body font-medium">
+            <span
+              className={`size-2 rounded-full ${
+                opening
+                  ? 'bg-brand motion-safe:animate-pulse'
+                  : running
+                    ? 'bg-status-online motion-safe:animate-breathe'
+                    : 'bg-status-offline'
+              }`}
+            />
+            {opening ? 'Opening gateway' : running ? 'Gateway running' : 'Gateway paused'}
+            <button
+              onClick={() => void (running ? stopGateway() : startGateway())}
+              disabled={opening}
+              aria-label={opening ? 'Opening gateway' : running ? 'Pause gateway' : 'Start gateway'}
+              className={`ml-auto rounded-md p-1 disabled:opacity-40 ${
+                running
+                  ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600'
+                  : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'
+              }`}
+            >
+              <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
+                {running ? <path d="M4 3h2.5v10H4zM9.5 3H12v10H9.5z" /> : <path d="M4.5 2.5v11L13 8z" />}
+              </svg>
+            </button>
+          </div>
+          <div className="mt-1.5 font-mono text-caption text-ink tabular-nums">
+            {host.ip}:{host.port}
+          </div>
+          <div className="mt-2.5 flex gap-3 text-body-small text-ink">
+            <span>
+              <span className="font-medium text-ink-emphasis tabular-nums">{online}</span> online
+            </span>
+            <span>
+              <span className="font-medium text-status-blocked tabular-nums">{blocked}</span> blocked
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="glass-card mt-auto rounded-xl p-3">
+          <div className="text-body font-medium text-ink-emphasis">Client mode</div>
+          <p className="mt-1 text-caption text-ink">
+            Connect to a teammate’s exposed gateway to use their MCP servers.
+          </p>
+        </div>
+      )}
+
+      {user && (
+        <div className="mt-3 flex items-center gap-3 rounded-xl border border-border bg-surface-raised p-3">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-caption font-medium text-brand-text">
+            {user.name.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-body-small font-medium text-ink-emphasis">{user.name}</div>
+            <div className="truncate text-caption text-ink">{user.email}</div>
+          </div>
           <button
-            onClick={() => void (running ? stopGateway() : startGateway())}
-            disabled={opening}
-            aria-label={opening ? 'Opening gateway' : running ? 'Pause gateway' : 'Start gateway'}
-            className={`ml-auto rounded-md p-1 disabled:opacity-40 ${running ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600' : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'}`}
+            type="button"
+            onClick={signOut}
+            className="rounded-md px-2 py-1 text-caption text-ink hover:bg-surface-muted hover:text-ink-emphasis"
           >
-            <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
-              {running ? (
-                <path d="M4 3h2.5v10H4zM9.5 3H12v10H9.5z" />
-              ) : (
-                <path d="M4.5 2.5v11L13 8z" />
-              )}
-            </svg>
+            Log out
           </button>
         </div>
-        <div className="mt-1.5 font-mono text-caption text-ink tabular-nums">
-          {host.ip}:{host.port}
-        </div>
-        <div className="mt-2.5 flex gap-3 text-body-small text-ink">
-          <span>
-            <span className="font-medium text-ink-emphasis tabular-nums">{online}</span> online
-          </span>
-          <span>
-            <span className="font-medium text-status-blocked tabular-nums">{blocked}</span> blocked
-          </span>
-        </div>
-      </div>
+      )}
     </aside>
   )
 }
 
+/** Render compact gateway and tailnet status details. */
 function StatusBar(): React.JSX.Element {
   const { host, servers, devices, tailscale, status } = useNetworkData()
   return (
@@ -182,8 +218,10 @@ function StatusBar(): React.JSX.Element {
   )
 }
 
+/** Render the mode switch and mode-specific gateway actions. */
 function TopBar(): React.JSX.Element {
   const [modal, setModal] = useState<'expose' | 'connect' | null>(null)
+  const { mode, setMode } = useAuth()
   const { status, tailscale } = useNetworkData()
   const running = status?.running ?? false
   const exposed = running && tailscale.available && status?.boundAddress === tailscale.ip
@@ -191,23 +229,53 @@ function TopBar(): React.JSX.Element {
   return (
     <>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <span className="text-body-small text-ink">Share your local MCP servers with your team</span>
+        <div>
+          <div className="text-body-small text-ink">
+            {mode === 'server' ? 'Share your local MCP servers with your team' : 'Connect to a teammate’s MCP gateway'}
+          </div>
+          <div className="mt-1 inline-flex rounded-lg border border-border bg-surface-raised p-0.5">
+            {(['client', 'server'] as const).map((item: AccountMode) => (
+              <button
+                key={item}
+                type="button"
+                aria-pressed={mode === item}
+                onClick={() => setMode(item)}
+                className={`rounded-md px-3 py-1 text-caption font-medium capitalize ${
+                  mode === item ? 'bg-brand text-primary-foreground' : 'text-ink hover:text-ink-emphasis'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setModal('connect')}
-            className="rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-body-small text-ink hover:text-ink-emphasis"
-          >
-            Connect to a peer
-          </button>
-          <button
-            onClick={() => setModal('expose')}
-            className="flex items-center gap-1.5 rounded-lg bg-brand px-2.5 py-1.5 text-body-small font-medium text-primary-foreground hover:opacity-90"
-          >
-            <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
-              <path d="M4.5 2.5v11L13 8z" />
-            </svg>
-            {running ? (exposed ? 'Open · exposed' : 'Open · local') : 'Open a connection'}
-          </button>
+          {mode === 'server' ? (
+            <>
+              <button
+                onClick={() => setModal('connect')}
+                className="rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-body-small text-ink hover:text-ink-emphasis"
+              >
+                Connect to a peer
+              </button>
+              <button
+                onClick={() => setModal('expose')}
+                className="flex items-center gap-1.5 rounded-lg bg-brand px-2.5 py-1.5 text-body-small font-medium text-primary-foreground hover:opacity-90"
+              >
+                <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
+                  <path d="M4.5 2.5v11L13 8z" />
+                </svg>
+                {running ? (exposed ? 'Open · exposed' : 'Open · local') : 'Open gateway'}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setModal('connect')}
+              className="rounded-lg bg-brand px-3 py-1.5 text-body-small font-medium text-primary-foreground hover:opacity-90"
+            >
+              Connect to a host
+            </button>
+          )}
         </div>
       </div>
       <ExposeModal open={modal === 'expose'} onClose={() => setModal(null)} />
@@ -216,8 +284,10 @@ function TopBar(): React.JSX.Element {
   )
 }
 
+/** Compose the authenticated dashboard and gate it behind demo sign-in. */
 function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('Network')
+  const { user } = useAuth()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -231,10 +301,12 @@ function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  if (!user) return <AuthPage />
+
   return (
-    <div className="grid h-screen grid-cols-shell grid-rows-shell">
+    <div className="grid h-screen grid-cols-shell grid-rows-shell overflow-hidden">
       <Sidebar page={page} onPage={setPage} />
-      <main className="overflow-y-auto">
+      <main className="min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
           <TopBar />
           {page === 'Network' ? (
@@ -247,6 +319,7 @@ function App(): React.JSX.Element {
         </div>
       </main>
       <StatusBar />
+      <Onboarding />
     </div>
   )
 }

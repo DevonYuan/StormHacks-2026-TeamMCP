@@ -14,6 +14,8 @@ import type { GatewayConfig } from '@shared/config'
 import type { PolicyDocument, PolicyRule } from '@shared/policy'
 import type { ServerConfig } from '@shared/protocol'
 import type { Device } from '@shared/types'
+import { useAuth } from '../auth/AuthContext'
+import { showOnboarding } from '../components/Onboarding'
 import { useNetworkData } from '../data/NetworkData'
 import { useTheme } from '../theme'
 import type { ThemePreference } from '../theme'
@@ -33,8 +35,10 @@ async function load(prev: Snapshot): Promise<Snapshot> {
   const api = window.electronAPI
   if (!api) return EMPTY
   const [policy, servers, config] = await Promise.all([
-    api.policy.get().catch(() => prev.policy),
-    api.servers.getAll().catch(() => prev.servers),
+    // `null` = gateway unreachable; keep the last good value instead of editing
+    // an empty policy (which would wipe the bootstrap rules).
+    api.policy.get().then((p) => p ?? prev.policy).catch(() => prev.policy),
+    api.servers.getAll().then((s) => s ?? prev.servers).catch(() => prev.servers),
     api.config
       .get()
       .then((c) => c.gateway)
@@ -618,6 +622,53 @@ function Appearance(): React.JSX.Element {
   )
 }
 
+/** Show the signed-in demo profile and volatile authentication event history. */
+function AccountActivity(): React.JSX.Element {
+  const { user, mode, events, signOut } = useAuth()
+
+  return (
+    <Section
+      title="Demo account"
+      hint="This profile and its activity history exist only in this app session; they are not database-backed."
+    >
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+        <div>
+          <div className="text-caption text-ink-muted uppercase">Signed in as</div>
+          <div className="mt-1 text-body font-medium text-ink-emphasis">{user?.name}</div>
+          <div className="text-body-small text-ink">{user?.email}</div>
+        </div>
+        <div>
+          <div className="text-caption text-ink-muted uppercase">Current mode</div>
+          <div className="mt-1 text-body font-medium capitalize text-ink-emphasis">{mode}</div>
+        </div>
+        <button type="button" onClick={showOnboarding} className={secondaryButton}>
+          Replay onboarding
+        </button>
+        <button type="button" onClick={signOut} className={secondaryButton}>
+          Log out
+        </button>
+      </div>
+      <h3 className="mt-6 text-h5 text-ink-muted uppercase">Recent account events</h3>
+      {events.length === 0 ? (
+        <p className="mt-2 text-body-small text-ink">No account events this session.</p>
+      ) : (
+        <ol className="mt-2 divide-y divide-border rounded-lg border border-border">
+          {events.slice(0, 8).map((event) => (
+            <li key={event.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+              <span className="text-body-small text-ink-emphasis">
+                {event.type.replaceAll('-', ' ')} · {event.email} · {event.mode}
+              </span>
+              <time className="font-mono text-caption text-ink-muted" dateTime={new Date(event.timestamp).toISOString()}>
+                {new Date(event.timestamp).toLocaleString()}
+              </time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Section>
+  )
+}
+
 export default function Settings(): React.JSX.Element {
   const { available, devices } = useNetworkData()
   const [snap, setSnap] = useState<Snapshot>(EMPTY)
@@ -656,6 +707,10 @@ export default function Settings(): React.JSX.Element {
         <h1 className="text-h1 text-ink-heading">Settings</h1>
       </div>
 
+      <div className="mb-6">
+        <AccountActivity />
+      </div>
+
       {error && (
         <p
           role="alert"
@@ -676,16 +731,16 @@ export default function Settings(): React.JSX.Element {
           <p className="text-body text-ink">Open the desktop app to change gateway settings.</p>
         ) : (
           <>
-          {snap.policy ? (
-            <Access policy={snap.policy} servers={snap.servers} devices={devices} busy={busy} act={act} />
-          ) : (
-            <Section title="Access">
-              <p className="text-body-small text-ink">Start the gateway to manage access and servers.</p>
-            </Section>
-          )}
-          {snap.policy && <Servers servers={snap.servers} busy={busy} act={act} />}
-          {snap.config && <Privacy config={snap.config} busy={busy} act={act} onNotice={setNotice} />}
-          {snap.config && <Network key={snap.config.port} config={snap.config} busy={busy} act={act} />}
+            {snap.policy ? (
+              <Access policy={snap.policy} servers={snap.servers} devices={devices} busy={busy} act={act} />
+            ) : (
+              <Section title="Access">
+                <p className="text-body-small text-ink">Start the gateway to manage access and servers.</p>
+              </Section>
+            )}
+            <Servers servers={snap.servers} busy={busy} act={act} />
+            {snap.config && <Privacy config={snap.config} busy={busy} act={act} onNotice={setNotice} />}
+            {snap.config && <Network key={snap.config.port} config={snap.config} busy={busy} act={act} />}
           </>
         )}
       </div>

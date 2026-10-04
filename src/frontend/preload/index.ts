@@ -18,52 +18,15 @@ import type {
   GatewayConfig,
 } from '../../backend/shared/index.js'
 import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from '../../backend/shared/types.js'
-
-// Type-safe IPC channel definitions
-type IpcChannels =
-  | 'gateway:start'
-  | 'gateway:stop'
-  | 'gateway:status'
-  | 'gateway:log'
-  | 'servers:get'
-  | 'servers:create'
-  | 'servers:update'
-  | 'servers:delete'
-  | 'servers:connect'
-  | 'servers:disconnect'
-  | 'servers:refresh'
-  | 'policy:get'
-  | 'policy:update'
-  | 'policy:addRule'
-  | 'policy:removeRule'
-  | 'activity:query'
-  | 'activity:stats'
-  | 'activity:prune'
-  | 'health:get'
-  | 'config:get'
-  | 'config:update'
-  | 'tailscale:status'
-  | 'tailscale:whois'
-  | 'tailscale:devices'
-  | 'event:activity'
-  | 'event:serverHealth'
-  | 'event:gatewayStatus'
-  | 'event:toolsChanged'
-  | 'protocol:url'
-  | 'host:stats'
-  | 'gateway:expose'
-  | 'share:get'
-  | 'peers:add'
-  | 'peers:remove'
-  | 'sessions:disconnect'
+import { IPC_CHANNELS, type IpcChannel } from '../../backend/shared/ipc.js'
 
 // Helper for typed invoke
-function invoke<Args extends unknown[], Return>(channel: IpcChannels, ...args: Args): Promise<Return> {
+function invoke<Args extends unknown[], Return>(channel: IpcChannel, ...args: Args): Promise<Return> {
   return ipcRenderer.invoke(channel, ...args)
 }
 
 // Helper for typed event listeners (listener receives only the payload)
-function on<EventType>(channel: IpcChannels, listener: (data: EventType) => void): () => void {
+function on<EventType>(channel: IpcChannel, listener: (data: EventType) => void): () => void {
   const wrapper = (_event: IpcRendererEvent, data: EventType) => listener(data)
   ipcRenderer.on(channel, wrapper)
   return () => ipcRenderer.off(channel, wrapper)
@@ -97,7 +60,7 @@ const api = {
 
   // Server management
   servers: {
-    getAll: () => invoke<[], ServerConfig[]>('servers:get'),
+    getAll: () => invoke<[], ServerConfig[] | null>('servers:get'),
     create: (server: Omit<ServerConfig, 'id' | 'createdAt' | 'updatedAt'>) =>
       invoke<[Omit<ServerConfig, 'id' | 'createdAt' | 'updatedAt'>], { success: boolean; server: ServerConfig }>(
         'servers:create',
@@ -116,7 +79,7 @@ const api = {
 
   // Policy management
   policy: {
-    get: () => invoke<[], PolicyDocument>('policy:get'),
+    get: () => invoke<[], PolicyDocument | null>('policy:get'),
     update: (policy: PolicyDocument) => invoke<[PolicyDocument], { success: boolean }>('policy:update', policy),
     addRule: (rule: PolicyRule) => invoke<[PolicyRule], { success: boolean }>('policy:addRule', rule),
     removeRule: (ruleId: string) => invoke<[string], { success: boolean }>('policy:removeRule', ruleId),
@@ -176,9 +139,9 @@ const api = {
 
   // Utility
   utils: {
-    openExternal: (url: string) => ipcRenderer.send('shell:openExternal', url),
+    openExternal: (url: string) => ipcRenderer.send(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, url),
     onProtocolUrl: (listener: (url: string) => void) =>
-      on('protocol:url', listener),
+      on(IPC_CHANNELS.PROTOCOL_URL, listener),
   },
 }
 

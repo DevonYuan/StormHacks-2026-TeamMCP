@@ -9,7 +9,6 @@
  * 5. Logs all activity
  */
 
-import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { GatewayConfig, loadConfigFromEnv, mergeConfig, DEFAULT_GATEWAY_CONFIG } from '../shared/config.js'
@@ -18,15 +17,8 @@ import { MCPClientManager } from './mcp/client.js'
 import { MCPProxyServer } from './mcp/server.js'
 import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
-import { getTailnetDevices, getTailscaleWhois } from './auth/tailscale.js'
-import { ServerConfigSchema, TransportType, type ServerConfig } from '../shared/protocol.js'
-import { PolicyDocumentSchema } from '../shared/policy.js'
 import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
-import { normalizePeerUrl, peerHost } from '../shared/peer.js'
-import { resolveHealthStatus } from './health.js'
-import { ZodError } from 'zod'
-import type { ActivityQuery, ServerHealth } from '../shared/activity.js'
-import type { ShareInfo } from '../shared/types.js'
+import { GatewayHttpRouter } from './http/routes.js'
 import pino from 'pino'
 
 const logger = pino({ name: 'gateway' })
@@ -41,54 +33,6 @@ export interface GatewayServices {
   policyEngine: PolicyEngine
 }
 
-// Context passed to HTTP request handlers
-interface HttpContext {
-  proxyServer: MCPProxyServer
-  authManager: AuthManager
-  policyEngine: PolicyEngine
-  repos: Repositories
-  clientManager: MCPClientManager
-  config: GatewayConfig
-}
-
-// The renderer (Vite on another port, or the Electron window) calls this
-// loopback admin API directly. The process only binds to 127.0.0.1 by default.
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-}
-
-/** True when a Team MCP gateway answers `/health` at `ip:port`. */
-async function probeGateway(ip: string, port: number): Promise<boolean> {
-  try {
-    const host = ip.includes(':') ? `[${ip}]` : ip
-    const res = await fetch(`http://${host}:${port}/health`, { signal: AbortSignal.timeout(1500) })
-    return res.ok && ((await res.json()) as { status?: string }).status === 'ok'
-  } catch {
-    return false
-  }
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Content-Length': Buffer.byteLength(payload),
-    ...CORS_HEADERS,
-  })
-  res.end(payload)
-}
-
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  let body = ''
-  for await (const chunk of req) {
-    body += chunk
-  }
-  if (!body) return {}
-  return JSON.parse(body) as Record<string, unknown>
-}
-
 /** True for addresses where a separate loopback listener is redundant/conflicting. */
 function coversLoopback(addr: string): boolean {
   return addr === '127.0.0.1' || addr === '::1' || addr === 'localhost' || addr === '0.0.0.0' || addr === '::'
@@ -100,8 +44,10 @@ export class Gateway {
   private loopbackServer: ReturnType<typeof createServer> | null = null
   private shuttingDown = false
 
+  /** Create a gateway using optional configuration overrides. */
   constructor(private readonly configOverrides: Partial<GatewayConfig> = {}) {}
 
+  /** Initialize persistence and services, then bind the configured and local listeners. */
   async start(): Promise<void> {
     logger.info('Starting Team MCP Gateway...')
 
@@ -168,11 +114,11 @@ export class Gateway {
     // Initialize MCP client manager
     const clientManager = new MCPClientManager(config)
 
-    // Connect to registered servers in the background: an unreachable upstream
-    // (e.g. an offline peer, whose TCP connect can hang for minutes) must not
-    // keep the gateway from listening.
+    // Connect to registered servers
     const servers = repos.servers.getEnabled()
     logger.info({ count: servers.length }, 'Connecting to registered MCP servers')
+    // Connect in the background: an unreachable upstream (e.g. an offline peer,
+    // whose TCP connect can hang for minutes) must not keep the gateway from listening.
     for (const server of servers) {
       clientManager.connect(server).catch((error) => {
         logger.error({ serverId: server.id, error }, 'Failed to connect to server')
@@ -195,27 +141,25 @@ export class Gateway {
 
     await proxyServer.start()
 
-    // Create the HTTP handler once; the data plane may bind one or two interfaces.
+    const router = new GatewayHttpRouter(logger)
+    const httpContext = {
+      proxyServer,
+      authManager,
+      policyEngine,
+      repos,
+      clientManager,
+      config,
+    }
     const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
-      void this.handleHttpRequest(req, res, {
-        proxyServer,
-        authManager,
-        policyEngine,
-        repos,
-        clientManager,
-        config,
-      })
+      void router.handleRequest(req, res, httpContext)
     }
 
     // Data plane: bind the configured interface (the tailnet IP when exposed).
     this.httpServer = createServer(handleRequest)
     await this.listenOn(this.httpServer, config.port, config.bindAddr)
 
-    // Control plane: when exposed to the tailnet the server no longer listens on
-    // loopback, which breaks the Electron main process's local control fetches
-    // (they would get ECONNREFUSED / "fetch failed"). Also serve 127.0.0.1 so the
-    // admin API stays reachable locally. Binding a specific interface and
-    // loopback on the same port is allowed.
+    // Keep the management API available to the local Electron process without
+    // exposing it to tailnet peers.
     if (!coversLoopback(config.bindAddr)) {
       this.loopbackServer = createServer(handleRequest)
       await this.listenOn(this.loopbackServer, config.port, '127.0.0.1')
@@ -238,531 +182,7 @@ export class Gateway {
     process.on('SIGINT', () => this.shutdown())
   }
 
-  private async handleHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    ctx: HttpContext
-  ): Promise<void> {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    const path = url.pathname
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, CORS_HEADERS)
-      res.end()
-      return
-    }
-
-    try {
-      // MCP Streamable HTTP endpoint (all sessions handled by the proxy)
-      if (path === '/mcp' || path.startsWith('/mcp/')) {
-        await ctx.proxyServer.handleRequest(req, res)
-        return
-      }
-
-      if (path === '/health') {
-        sendJson(res, 200, { status: 'ok', ...ctx.proxyServer.getStatus() })
-        return
-      }
-
-      if (path === '/auth/token' && req.method === 'POST') {
-        await this.handleTokenExchange(req, res, ctx.authManager)
-        return
-      }
-
-      if (path === '/policy' && req.method === 'GET') {
-        sendJson(res, 200, ctx.policyEngine.getPolicy())
-        return
-      }
-
-      if (path.startsWith('/api/')) {
-        await this.handleApiRequest(req, res, url, ctx)
-        return
-      }
-
-      sendJson(res, 404, { error: 'Not Found' })
-    } catch (error) {
-      // Client-side errors (schema validation / malformed body) must not surface as 500.
-      if (error instanceof ZodError) {
-        logger.warn({ path, issues: error.issues }, 'Request validation failed')
-        if (!res.headersSent) {
-          sendJson(res, 400, { error: 'Validation failed', issues: error.issues })
-        }
-        return
-      }
-      if (error instanceof SyntaxError) {
-        logger.warn({ path, error: error.message }, 'Malformed request body')
-        if (!res.headersSent) {
-          sendJson(res, 400, { error: 'Malformed JSON body' })
-        }
-        return
-      }
-      logger.error({ error, path }, 'Request failed')
-      if (!res.headersSent) {
-        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
-      }
-    }
-  }
-
-  private async handleApiRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    url: URL,
-    ctx: HttpContext
-  ): Promise<void> {
-    const segments = url.pathname.split('/').filter(Boolean) // ['api', resource, id, action]
-    const resource = segments[1]
-    const id = segments[2]
-    const action = segments[3]
-
-    switch (resource) {
-      case 'status': {
-        const status = ctx.proxyServer.getStatus()
-        sendJson(res, 200, {
-          ...status,
-          boundAddress: ctx.config.bindAddr,
-          port: ctx.config.port,
-          connectedPeers: status.activeSessions,
-        })
-        return
-      }
-
-      case 'servers':
-        return this.handleServersApi(req, res, id, action, ctx)
-
-      case 'share':
-        return this.handleShareApi(req, res, ctx)
-
-      case 'peers':
-        return this.handlePeersApi(req, res, id, ctx)
-
-      case 'policy':
-        return this.handlePolicyApi(req, res, ctx)
-
-      // /api/sessions/:deviceId — close a device's open MCP sessions.
-      case 'sessions': {
-        if (req.method !== 'DELETE') return sendJson(res, 405, { error: 'Method Not Allowed' })
-        if (!id) return sendJson(res, 400, { error: 'Missing device id' })
-        const closed = await ctx.proxyServer.closeSessionsForDevice(decodeURIComponent(id))
-        sendJson(res, 200, { success: true, closed })
-        return
-      }
-
-      case 'activity':
-        return this.handleActivityApi(req, res, url, id, ctx)
-
-      case 'health': {
-        if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method Not Allowed' })
-        sendJson(res, 200, this.collectHealth(ctx))
-        return
-      }
-
-      case 'tailscale': {
-        if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method Not Allowed' })
-
-        // /api/tailscale/devices — every node on the tailnet (Self + Peer).
-        if (id === 'devices') {
-          if (!ctx.authManager.isTailscaleReady()) {
-            sendJson(res, 200, { available: false, self: null, devices: [] })
-            return
-          }
-          try {
-            const nodes = await getTailnetDevices(ctx.config)
-            const sessions = ctx.proxyServer.sessionsByDevice()
-            // ponytail: probes every online peer on each poll, assuming they use our port;
-            // cache results if the tailnet grows past a handful of machines.
-            const devices = await Promise.all(
-              nodes
-                .filter((node) => !node.self)
-                .map(async (node) => ({
-                  ...node,
-                  sessions: sessions.get(node.id) ?? 0,
-                  gatewayUp:
-                    node.online && node.ips[0]
-                      ? await probeGateway(node.ips[0], ctx.config.port)
-                      : false,
-                }))
-            )
-            sendJson(res, 200, {
-              available: true,
-              self: nodes.find((node) => node.self) ?? null,
-              devices,
-            })
-          } catch (error) {
-            logger.warn({ error }, 'Failed to enumerate tailnet devices')
-            sendJson(res, 200, { available: false, self: null, devices: [] })
-          }
-          return
-        }
-
-        // /api/tailscale/whois?ip=… — resolve a single IP to its tailnet node.
-        if (id === 'whois') {
-          const ip = url.searchParams.get('ip')
-          if (!ip) return sendJson(res, 400, { error: 'Missing ip query parameter' })
-          try {
-            sendJson(res, 200, await getTailscaleWhois(ip, ctx.config))
-          } catch (error) {
-            sendJson(res, 502, {
-              error: `whois failed for ${ip}: ${error instanceof Error ? error.message : String(error)}`,
-            })
-          }
-          return
-        }
-
-        const available = ctx.authManager.isTailscaleReady()
-        const info = available ? await ctx.authManager.getLocalInfo() : null
-        sendJson(res, 200, {
-          available,
-          ip: info?.ip ?? null,
-          hostname: info?.hostname ?? null,
-          dnsName: info?.dnsName ?? null,
-        })
-        return
-      }
-
-      default:
-        sendJson(res, 404, { error: 'Not Found' })
-    }
-  }
-
-  private async handleServersApi(
-    req: IncomingMessage,
-    res: ServerResponse,
-    id: string | undefined,
-    action: string | undefined,
-    ctx: HttpContext
-  ): Promise<void> {
-    const { repos, clientManager } = ctx
-
-    // /api/servers
-    if (!id) {
-      if (req.method === 'GET') {
-        sendJson(res, 200, repos.servers.getAll())
-        return
-      }
-      if (req.method === 'POST') {
-        const body = await readJson(req)
-        const parsed = ServerConfigSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(body)
-        const created = repos.servers.create(parsed)
-        if (created.enabled) {
-          try {
-            await clientManager.connect(created)
-            repos.health.recordSuccess(created.id, 0)
-          } catch (error) {
-            repos.health.recordFailure(
-              created.id,
-              error instanceof Error ? error.message : String(error)
-            )
-          }
-        }
-        sendJson(res, 201, created)
-        return
-      }
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-
-    const existing = repos.servers.getById(id)
-    if (!existing) {
-      sendJson(res, 404, { error: `Server not found: ${id}` })
-      return
-    }
-
-    // /api/servers/:id
-    if (!action) {
-      if (req.method === 'GET') {
-        sendJson(res, 200, existing)
-        return
-      }
-      if (req.method === 'PUT') {
-        const body = await readJson(req)
-        const updates = ServerConfigSchema.omit({ id: true, createdAt: true, updatedAt: true })
-          .partial()
-          .parse(body)
-        const updated = repos.servers.update(id, updates)
-        if (updated) {
-          try {
-            if (updated.enabled) await clientManager.connect(updated)
-            else await clientManager.disconnect(updated.id)
-          } catch (error) {
-            repos.health.recordFailure(
-              updated.id,
-              error instanceof Error ? error.message : String(error)
-            )
-          }
-        }
-        sendJson(res, 200, updated)
-        return
-      }
-      if (req.method === 'DELETE') {
-        await clientManager.disconnect(id)
-        const ok = repos.servers.delete(id)
-        sendJson(res, 200, { success: ok })
-        return
-      }
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-
-    // /api/servers/:id/:action
-    if (req.method !== 'POST') {
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-
-    switch (action) {
-      case 'connect':
-        await clientManager.connect(existing)
-        repos.health.recordSuccess(id, 0)
-        sendJson(res, 200, { success: true })
-        return
-      case 'disconnect':
-        await clientManager.disconnect(id)
-        sendJson(res, 200, { success: true })
-        return
-      case 'refresh': {
-        await clientManager.refreshCapabilities(id)
-        const conn = clientManager.getConnection(id)
-        sendJson(res, 200, { success: true, tools: conn?.tools ?? [] })
-        return
-      }
-      default:
-        sendJson(res, 404, { error: `Unknown action: ${action}` })
-    }
-  }
-
-  /**
-   * Share info for the "expose" flow: what peers should connect to. (`GET /api/share`)
-   */
-  private async handleShareApi(
-    req: IncomingMessage,
-    res: ServerResponse,
-    ctx: HttpContext
-  ): Promise<void> {
-    if (req.method !== 'GET') {
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-
-    const available = ctx.authManager.isTailscaleReady()
-    const info = available ? await ctx.authManager.getLocalInfo() : null
-    const status = ctx.proxyServer.getStatus()
-    const bindAddress = ctx.config.bindAddr
-    const localOnly =
-      bindAddress === '127.0.0.1' || bindAddress === '::1' || bindAddress === 'localhost'
-
-    const payload: ShareInfo = {
-      running: status.running,
-      address: `${bindAddress}:${ctx.config.port}`,
-      mcpUrl: `http://${bindAddress}:${ctx.config.port}/mcp`,
-      bindAddress,
-      port: ctx.config.port,
-      localOnly,
-      connectedPeers: status.activeSessions,
-      servers: ctx.repos.servers.getAll().length,
-      tailscale: {
-        available,
-        ip: info?.ip ?? null,
-        hostname: info?.hostname ?? null,
-        dnsName: info?.dnsName ?? null,
-      },
-    }
-
-    sendJson(res, 200, payload)
-  }
-
-  /**
-   * Peer gateways: register/probe a teammate's exposed gateway as a
-   * Streamable-HTTP upstream. (`POST /api/peers`, `DELETE /api/peers/:id`)
-   */
-  private async handlePeersApi(
-    req: IncomingMessage,
-    res: ServerResponse,
-    id: string | undefined,
-    ctx: HttpContext
-  ): Promise<void> {
-    const { repos, clientManager } = ctx
-
-    // /api/peers — add (or probe) a peer.
-    if (!id) {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { error: 'Method Not Allowed' })
-        return
-      }
-
-      const body = await readJson(req)
-      const address = typeof body.address === 'string' ? body.address : ''
-      const probe = body.probe === true
-
-      let url: string
-      try {
-        url = normalizePeerUrl(address)
-      } catch (error) {
-        sendJson(res, 400, {
-          error: error instanceof Error ? error.message : 'Invalid peer address',
-        })
-        return
-      }
-
-      const host = peerHost(url)
-      // Handshake against an unsaved config. Persisting first made a failing peer
-      // show up in Connected peers for a poll or two, then disappear.
-      const now = Date.now()
-      const draft: ServerConfig = {
-        id: randomUUID(),
-        name: `peer:${host}`,
-        transport: TransportType.StreamableHttp,
-        url,
-        enabled: true,
-        description: 'Remote Team MCP Gateway peer',
-        createdAt: now,
-        updatedAt: now,
-      }
-
-      try {
-        await clientManager.connect(draft)
-      } catch (error) {
-        await clientManager.disconnect(draft.id).catch(() => undefined)
-        sendJson(res, 502, {
-          error: `Could not reach ${host}: ${error instanceof Error ? error.message : String(error)}`,
-        })
-        return
-      }
-
-      const tools = (clientManager.getConnection(draft.id)?.tools ?? []).map((t) => ({
-        name: t.name,
-        description: t.description,
-      }))
-
-      // A probe validates reachability without keeping the peer registered.
-      if (probe) {
-        await clientManager.disconnect(draft.id)
-        sendJson(res, 200, { success: true, probe: true, url, tools })
-        return
-      }
-
-      const created = repos.servers.save(draft)
-      repos.health.recordSuccess(created.id, 0)
-      sendJson(res, 201, { success: true, url, tools, server: created })
-      return
-    }
-
-    // /api/peers/:id — remove a peer.
-    if (req.method !== 'DELETE') {
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-    await clientManager.disconnect(id)
-    const ok = repos.servers.delete(id)
-    sendJson(res, 200, { success: ok })
-  }
-
-  private async handlePolicyApi(
-    req: IncomingMessage,
-    res: ServerResponse,
-    ctx: HttpContext
-  ): Promise<void> {
-    if (req.method === 'GET') {
-      sendJson(res, 200, ctx.repos.policy.get())
-      return
-    }
-    if (req.method === 'PUT') {
-      const body = await readJson(req)
-      const policy = PolicyDocumentSchema.parse({ ...body, updatedAt: Date.now() })
-      ctx.repos.policy.set(policy)
-      ctx.policyEngine.updatePolicy(policy)
-      sendJson(res, 200, { success: true, policy })
-      return
-    }
-    sendJson(res, 405, { error: 'Method Not Allowed' })
-  }
-
-  private async handleActivityApi(
-    req: IncomingMessage,
-    res: ServerResponse,
-    url: URL,
-    id: string | undefined,
-    ctx: HttpContext
-  ): Promise<void> {
-    if (id === 'stats' && req.method === 'GET') {
-      const sinceParam = url.searchParams.get('since')
-      sendJson(res, 200, ctx.repos.activity.getStats(sinceParam ? Number(sinceParam) : undefined))
-      return
-    }
-
-    if (id === 'prune' && req.method === 'POST') {
-      const body = await readJson(req)
-      const olderThanMs =
-        typeof body.olderThanMs === 'number'
-          ? body.olderThanMs
-          : Date.now() - 30 * 24 * 60 * 60 * 1000
-      const count = ctx.repos.activity.prune(olderThanMs)
-      sendJson(res, 200, { success: true, count })
-      return
-    }
-
-    if (req.method !== 'GET') {
-      sendJson(res, 405, { error: 'Method Not Allowed' })
-      return
-    }
-
-    const q = url.searchParams
-    const query: ActivityQuery = {
-      limit: q.get('limit') ? Number(q.get('limit')) : 100,
-      offset: q.get('offset') ? Number(q.get('offset')) : 0,
-    }
-    if (q.get('since')) query.since = Number(q.get('since'))
-    if (q.get('until')) query.until = Number(q.get('until'))
-    if (q.get('identity')) query.identity = q.get('identity')!
-    if (q.get('deviceId')) query.deviceId = q.get('deviceId')!
-    if (q.get('serverId')) query.serverId = q.get('serverId')!
-    if (q.get('toolName')) query.toolName = q.get('toolName')!
-    if (q.get('method')) query.method = q.get('method')!
-    if (q.get('success') !== null) query.success = q.get('success') === 'true'
-    const sortBy = q.get('sortBy')
-    if (sortBy === 'timestamp' || sortBy === 'duration_ms') query.sortBy = sortBy
-    const sortOrder = q.get('sortOrder')
-    if (sortOrder === 'asc' || sortOrder === 'desc') query.sortOrder = sortOrder
-
-    sendJson(res, 200, ctx.repos.activity.query(query))
-  }
-
-  private collectHealth(ctx: HttpContext): ServerHealth[] {
-    const records = new Map(ctx.repos.health.getAll().map((h) => [h.serverId, h]))
-    const connected = new Set(ctx.clientManager.getConnectedServers().map((c) => c.serverId))
-
-    return ctx.repos.servers.getAll().map((server) => {
-      const existing = records.get(server.id)
-      const isConnected = connected.has(server.id)
-      const status = resolveHealthStatus(isConnected, existing)
-      const isFailing = status === 'unhealthy' || status === 'degraded'
-
-      return {
-        serverId: server.id,
-        status,
-        lastCheck: existing?.lastCheck,
-        latencyMs: isConnected ? existing?.latencyMs : undefined,
-        error: isFailing ? existing?.error : undefined,
-        consecutiveFailures: isFailing ? existing?.consecutiveFailures ?? 0 : 0,
-      }
-    })
-  }
-
-  private async handleTokenExchange(
-    req: IncomingMessage,
-    res: ServerResponse,
-    authManager: AuthManager
-  ): Promise<void> {
-    const body = await readJson(req)
-
-    try {
-      const clientIp = typeof body.clientIp === 'string' ? body.clientIp : '127.0.0.1'
-      const result = await authManager.authenticateConnection(clientIp)
-      sendJson(res, 200, result)
-    } catch (error: unknown) {
-      sendJson(res, 500, { success: false, error: String(error) })
-    }
-  }
-
+  /** Stop active clients and listeners before exiting the gateway process. */
   async shutdown(): Promise<void> {
     if (this.shuttingDown) return
     this.shuttingDown = true
@@ -796,12 +216,14 @@ export class Gateway {
     })
   }
 
+  /** Expose initialized services for integration and embedding use. */
   getServices(): GatewayServices | null {
     return this.services
   }
 }
 
 // CLI entry point
+/** Parse command-line overrides and start the standalone gateway process. */
 async function main() {
   const configOverrides: Partial<GatewayConfig> = {}
 
