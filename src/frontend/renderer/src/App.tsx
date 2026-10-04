@@ -1,15 +1,11 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import Home from './pages/Home'
 import Machines from './pages/Machines'
-import { devices, host, servers } from './mock'
+import { useNetworkData } from './data/NetworkData'
+import { ConnectModal } from './components/ConnectModal'
+import { ExposeModal } from './components/ExposeModal'
 
-
-type Page = 
-| 'Network' 
-| 'Machines' 
-| 'MCP Apps'
-| 'Gateway'
-| 'Settings '
+type Page = 'Network' | 'Machines' | 'Settings'
 type Theme = 'light' | 'dark'
 
 /** Light by default; the choice persists across launches. */
@@ -25,9 +21,10 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
 }
 
+// Fixed order, used for the ⌘1/⌘2/⌘3 shortcuts.
+const PAGES: Page[] = ['Network', 'Machines', 'Settings']
+
 const isMac = navigator.userAgent.includes('Mac')
-const blocked = devices.filter((d) => d.status === 'blocked').length
-const online = devices.filter((d) => d.status === 'online').length
 
 function Icon({ page }: { page: Page }): React.JSX.Element {
   const common = {
@@ -64,34 +61,23 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
   )
 }
 
-const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
-  { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
-  { page: 'Machines', badge: { text: devices.length, alert: false } },
-  { page: 'Gateway' },
-  { page: 'MCP Apps' },
-  { page: 'Settings' }
-]
-
 function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
-  const [running, setRunning] = useState(true)
+  const { devices, servers, host, status, startGateway, stopGateway } = useNetworkData()
   const [theme, toggleTheme] = useTheme()
+  const running = status?.running ?? false
+  const blocked = devices.filter((d) => d.status === 'blocked').length
+  const online = devices.filter((d) => d.status === 'online').length
+
+  const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
+    { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
+    { page: 'Machines', badge: devices.length ? { text: devices.length, alert: false } : undefined },
+    { page: 'Settings' }
+  ]
 
   return (
     <aside className="row-span-2 flex flex-col border-r border-border bg-surface-sidebar px-3 py-5">
-      <div className="flex items-center gap-2.5 px-2">
-        <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
-          <rect width="32" height="32" rx="7" className="fill-brand" />
-          <path
-            d="M9 22 L15 10 M17 22 L23 10"
-            className="stroke-primary-foreground"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        <div className="leading-tight">
-          <div className="text-h3 text-ink-heading">Team MCP</div>
-          <div className="text-body-small text-ink">Gateway</div>
-        </div>
+      <div className="flex items-center gap-2 px-2">
+        <img src="./logo.png" alt="Tether" className="h-10 w-auto" />
         <button
           onClick={toggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -162,12 +148,15 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
           {servers.map((s) => (
             <li key={s.id} className="flex items-center gap-2.5 font-mono text-code">
               <span
-                className={`size-1.5 rounded-full ${s.running ? 'bg-status-online' : 'bg-status-offline'}`}
+                className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-status-online' : 'bg-status-offline'}`}
               />
-              <span className={s.running ? 'text-ink-emphasis' : 'text-ink'}>{s.id}</span>
-              <span className="ml-auto text-caption text-ink-muted">{s.transport}</span>
+              <span className={`truncate ${s.running ? 'text-ink-emphasis' : 'text-ink'}`}>
+                {s.name ?? s.id}
+              </span>
+              <span className="ml-auto shrink-0 text-caption text-ink-muted">{s.transport}</span>
             </li>
           ))}
+          {servers.length === 0 && <li className="text-caption text-ink-muted">No servers registered</li>}
         </ul>
       </div>
 
@@ -177,9 +166,8 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
             className={`size-2 rounded-full ${running ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
           />
           {running ? 'Gateway running' : 'Gateway paused'}
-          {/* ponytail: UI-only toggle until the gateway process exposes start/stop over IPC. */}
           <button
-            onClick={() => setRunning(!running)}
+            onClick={() => void (running ? stopGateway() : startGateway())}
             aria-label={running ? 'Pause gateway' : 'Start gateway'}
             className="ml-auto rounded-md p-1 text-ink hover:bg-surface-muted hover:text-ink-emphasis"
           >
@@ -209,19 +197,54 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
 }
 
 function StatusBar(): React.JSX.Element {
+  const { host, servers, devices, tailscale, status } = useNetworkData()
   return (
     <footer className="flex h-statusbar items-center gap-5 border-t border-border bg-surface px-5 font-mono text-caption text-ink">
       <span className="flex items-center gap-1.5">
-        <span className="size-1.5 rounded-full bg-status-online" />
-        tailnet
+        <span className={`size-1.5 rounded-full ${tailscale.available ? 'bg-status-online' : 'bg-status-offline'}`} />
+        {tailscale.available ? 'tailnet' : 'local only'}
       </span>
       <span>{host.dns}</span>
       <span>
-        {host.sharedServers} servers · {devices.length} devices
+        {servers.length} servers · {devices.length} devices
       </span>
-      <span>uptime {host.uptime}</span>
+      <span>uptime {status?.running ? host.uptime : '—'}</span>
       <span className="ml-auto">v0.1.0</span>
     </footer>
+  )
+}
+
+function TopBar(): React.JSX.Element {
+  const [modal, setModal] = useState<'expose' | 'connect' | null>(null)
+  const { status, tailscale } = useNetworkData()
+  const running = status?.running ?? false
+  const exposed = running && tailscale.available && status?.boundAddress === tailscale.ip
+
+  return (
+    <>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <span className="text-body-small text-ink">Share your local MCP servers with your team</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setModal('connect')}
+            className="rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-body-small text-ink hover:text-ink-emphasis"
+          >
+            Connect to a peer
+          </button>
+          <button
+            onClick={() => setModal('expose')}
+            className="flex items-center gap-1.5 rounded-lg bg-brand px-2.5 py-1.5 text-body-small font-medium text-primary-foreground hover:opacity-90"
+          >
+            <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
+              <path d="M4.5 2.5v11L13 8z" />
+            </svg>
+            {running ? (exposed ? 'Open · exposed' : 'Open · local') : 'Open a connection'}
+          </button>
+        </div>
+      </div>
+      <ExposeModal open={modal === 'expose'} onClose={() => setModal(null)} />
+      <ConnectModal open={modal === 'connect'} onClose={() => setModal(null)} />
+    </>
   )
 }
 
@@ -230,10 +253,10 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      const target = nav[Number(e.key) - 1]
+      const target = PAGES[Number(e.key) - 1]
       if ((e.metaKey || e.ctrlKey) && target) {
         e.preventDefault()
-        setPage(target.page)
+        setPage(target)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -245,6 +268,7 @@ function App(): React.JSX.Element {
       <Sidebar page={page} onPage={setPage} />
       <main className="overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
+          <TopBar />
           {page === 'Network' ? (
             <Home />
           ) : page === 'Machines' ? (

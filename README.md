@@ -294,7 +294,7 @@ The gateway listens on `GATEWAY_PORT` (default `8788`).
 
 | Service | Required for | Cost | What you actually need |
 | --- | --- | --- | --- |
-| **Tailscale** | Cross-network remote access — the core demo | Free | One account, both machines joined to the same tailnet, MagicDNS enabled, signed in per machine |
+| **Tailscale** | Cross-network remote access — the core demo | Free | One account; every machine joined to the **same tailnet**. No API key, OAuth client, or auth key needed (the app only uses the local CLI). Invite teammates as users, or share your machine to their account. |
 | **GitHub** | The Git / GitHub MCP server demo | Free | A **fine-grained PAT** scoped read-only to `Contents` + `Metadata`. Not a classic token with full `repo` scope. |
 | **An AI client with model access** | Driving the remote end of the demo | Varies (you already have one) | Claude Desktop, or VS Code + Copilot Chat, or any MCP-capable client. The **gateway itself never needs a model API key.** |
 
@@ -411,25 +411,62 @@ The **remote** machine's client points at the host's tailnet address (`http://<h
 
 ### Tailscale setup (for remote / cross-network testing)
 
-1. Create a tailnet and install Tailscale on **both** machines.
-2. Sign both machines into the **same** tailnet.
-3. Enable **MagicDNS** in the admin console so the tailnet hostname resolves.
-4. Verify from the remote machine:
+Tailscale is what lets two machines on **different WiFi networks** reach each other: the gateway binds
+its tailnet interface, and peers dial its `100.x.y.z` address or MagicDNS name. The app consumes the
+Tailscale you already have — it only shells out to the local `tailscale` CLI (`tailscale status
+--json`, `tailscale whois`).
+
+#### What this requires in your Tailscale account
+
+**Nothing needs to be created or configured in the Tailscale admin console by our app — it uses no
+API key, OAuth client, auth key, or billing.** You just need a working tailnet and the peers on it:
+
+| Action | Required? | Why |
+| --- | --- | --- |
+| Install Tailscale + `tailscale up` (sign in) on the **host** | **Yes** | The gateway discovers its own address and resolves peers via the local CLI |
+| Get every teammate onto the **same tailnet** | **Yes** | Tailscale only connects devices within one tailnet |
+| Change ACLs | Only if you've customized them | A personal tailnet defaults to **allow all**; otherwise allow the gateway port (e.g. `8788`) between peers |
+| Enable **MagicDNS** | Optional | Lets peers use `host.tailnet.ts.net`; plain `100.x` IPs work without it |
+| Create an API key / OAuth client / auth key | **No** | Not used anywhere in the app |
+| Upgrade your Tailscale plan | **No** | The free plan is enough for a small demo |
+
+**Getting teammates onto the same tailnet** — pick whichever fits your account:
+
+- **Same account (simplest for a demo):** everyone signs into one Tailscale account.
+- **Invite as users:** on an organization tailnet, invite teammates as users in the admin console.
+- **Share your node:** on a personal tailnet, use **Admin console → Machines → Share** to share the
+  host machine with a teammate's account. Note this is **one-directional** — for the host to reach a
+  teammate's gateway, they must share back (or you all use one tailnet).
+
+#### Steps
+
+1. Install Tailscale and sign in on **both** machines; confirm they are on the **same** tailnet.
+2. (Optional) Enable **MagicDNS** in the admin console so the tailnet hostname resolves.
+3. Verify from the remote machine:
 
 ```bash
 tailscale status --json | jq '.Self.DNSName'
 tailscale ping <host-machine>
 ```
 
-5. On the host, set `GATEWAY_BIND_ADDR` to its tailnet IP (`100.x.y.z`).
+4. On the host, expose the gateway. The easiest path is the **"Open a connection"** button in the
+   Network page, which reads the host's tailnet IP and (re)binds the gateway to it automatically.
+   The manual equivalent is to set `GATEWAY_BIND_ADDR` to the host's tailnet IP (`100.x.y.z`) —
+   **never `0.0.0.0`**.
+5. On the remote machine, add the host's endpoint to your MCP client (see
+   [Configuring MCP clients](#configuring-mcp-clients-for-testing)):
+   `http://<host>.ts.net:8788/mcp` (or `http://100.x.y.z:8788/mcp`).
 
-**macOS gotcha:** the app bundle does not put the CLI on `PATH`. Either call the full path or symlink it:
+#### Platform gotchas
+
+**macOS:** the app bundle does not put the CLI on `PATH`. Either call the full path or symlink it:
 
 ```bash
 sudo ln -s /Applications/Tailscale.app/Contents/MacOS/Tailscale /usr/local/bin/tailscale
 ```
 
-The gateway shells out to `tailscale status --json` and `tailscale whois`, so a missing CLI is a setup blocker — point the gateway at it with `TAILSCALE_CLI` if you would rather not symlink.
+The gateway shells out to `tailscale status --json` and `tailscale whois`, so a missing CLI is a
+setup blocker — point the gateway at it with `TAILSCALE_CLI` if you would rather not symlink.
 
 **Linux:** grant your user access to the daemon so `whois` works without `sudo`:
 
@@ -437,7 +474,22 @@ The gateway shells out to `tailscale status --json` and `tailscale whois`, so a 
 sudo tailscale set --operator=$USER
 ```
 
-**No Tailscale? Develop on LAN.** Two machines on the same network can use the host's LAN IP. The network is a pluggable transport, so LAN mode exercises everything except the identity layer — authentication falls back to a pre-shared local token, which is the one place the auth model differs between LAN and tailnet modes.
+#### How the host recognises a peer
+
+On connect, the gateway resolves the caller's identity from the **source IP of the connection** (not
+from a token): a tailnet `100.x` address is mapped through `tailscale whois <ip>` to
+`{ user, device, deviceId, tailnet }`; loopback/private addresses map to `local@dev`. That identity is
+then checked against the policy document before any tool call is forwarded.
+
+> **Verify `whois` output on your machine.** The gateway runs `tailscale whois <ip>` and parses the
+> result as JSON. If your CLI prints the human-readable form by default, identity resolution fails and
+> the session falls back to `local@dev` (which the bootstrap policy allows). Check with
+> `tailscale whois --json <ip>`.
+
+**No Tailscale? Stay local (loopback).** With the default `GATEWAY_BIND_ADDR=127.0.0.1`, the gateway is
+reachable only from the host machine. Cross-machine sharing in this MVP is Tailscale-only — the
+"Open a connection" action binds the **tailnet** interface, not a LAN address, so two machines on the
+same WiFi without Tailscale will not connect.
 
 ### Testing setup
 

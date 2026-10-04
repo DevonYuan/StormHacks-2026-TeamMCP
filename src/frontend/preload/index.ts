@@ -17,7 +17,7 @@ import type {
   GatewayStatus,
   GatewayConfig,
 } from '../../backend/shared/index.js'
-import type { HostStats } from '../../backend/shared/types.js'
+import type { AddPeerResult, HostStats, ShareInfo } from '../../backend/shared/types.js'
 
 // Type-safe IPC channel definitions
 type IpcChannels =
@@ -50,6 +50,10 @@ type IpcChannels =
   | 'event:toolsChanged'
   | 'protocol:url'
   | 'host:stats'
+  | 'gateway:expose'
+  | 'share:get'
+  | 'peers:add'
+  | 'peers:remove'
 
 // Helper for typed invoke
 function invoke<Args extends unknown[], Return>(channel: IpcChannels, ...args: Args): Promise<Return> {
@@ -69,6 +73,20 @@ const api = {
   gateway: {
     start: () => invoke('gateway:start'),
     stop: () => invoke('gateway:stop'),
+    expose: () =>
+      invoke<
+        [],
+        {
+          success: boolean
+          bindAddr: string
+          tailnet: {
+            available: boolean
+            ip: string | null
+            hostname: string | null
+            dnsName: string | null
+          }
+        }
+      >('gateway:expose'),
     getStatus: () => invoke<[], GatewayStatus>('gateway:status'),
     onLog: (listener: (log: { timestamp: number; message: string; level?: string }) => void) =>
       on('gateway:log', listener),
@@ -112,6 +130,16 @@ const api = {
   // Host machine CPU/memory
   host: {
     stats: () => invoke<[], HostStats>('host:stats'),
+  },
+
+  // Share (this gateway) + peers (other gateways)
+  share: {
+    get: () => invoke<[], ShareInfo>('share:get'),
+  },
+  peers: {
+    add: (address: string, probe = false) =>
+      invoke<[string, boolean], AddPeerResult>('peers:add', address, probe),
+    remove: (id: string) => invoke<[string], { success: boolean }>('peers:remove', id),
   },
 
   // Health monitoring

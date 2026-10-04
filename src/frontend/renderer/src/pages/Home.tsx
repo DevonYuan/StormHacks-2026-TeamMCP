@@ -1,24 +1,29 @@
 import { useEffect, useState } from 'react'
-import type { Device, DeviceStatus, HostStats } from '@shared/types'
-import { activity, devices, gateway, host, servers } from '../mock'
+import type {
+  ActivityEvent,
+  Device,
+  DeviceStatus,
+  GatewayMetrics,
+  Host,
+  HostStats,
+  Server,
+} from '@shared/types'
+import { useNetworkData } from '../data/NetworkData'
 
 // Tree geometry lives in one viewBox; HTML cards are placed by percentage of it,
-// so edges and cards stay aligned at any width.
+// so edges and cards stay aligned at any width. Height depends on the device count.
 const W = 800
 const ROW = 92
-const H = Math.max(320, devices.length * ROW + 16)
 const HOST_X = 24
 const HOST_W = 220
 const DEV_X = 492
 const DEV_W = 284
 const PORT_L = HOST_X + HOST_W
 const BEND = (DEV_X - PORT_L) / 2
-const yHost = H / 2
-const yDevice = (i: number): number => H / 2 + (i - (devices.length - 1) / 2) * ROW
-const edge = (y: number): string =>
+const edge = (yHost: number, y: number): string =>
   `M ${PORT_L} ${yHost} C ${PORT_L + BEND} ${yHost}, ${DEV_X - BEND} ${y}, ${DEV_X} ${y}`
 const pctX = (x: number): string => `${(x / W) * 100}%`
-const pctY = (y: number): string => `${(y / H) * 100}%`
+const pctY = (y: number, h: number): string => `${(y / h) * 100}%`
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const gb = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1)
@@ -35,14 +40,14 @@ const stroke: Record<DeviceStatus, { className: string; dash?: string; width: nu
   blocked: { className: 'stroke-status-blocked', dash: '0.5 7', width: 2.25 }
 }
 
-const denied = (d: Device): number =>
+const denied = (d: Device, activity: ActivityEvent[]): number =>
   activity.filter((e) => e.deviceId === d.id && e.outcome === 'denied').length
 const rate = (d: Device): number => d.traffic.at(-1) ?? 0
 
-function statusLine(d: Device): string {
-  if (d.status === 'online') return `Online via ${d.client}. Last call at ${d.lastSeen}.`
+function statusLine(d: Device, activity: ActivityEvent[]): string {
+  if (d.status === 'online') return `Online. ${d.callsToday} calls today, last at ${d.lastSeen}.`
   if (d.status === 'offline') return `Offline. Last seen ${d.lastSeen}.`
-  return `Blocked. ${denied(d)} denied attempts, last at ${d.lastSeen}.`
+  return `Blocked. ${denied(d, activity)} denied attempts, last at ${d.lastSeen}.`
 }
 
 /** Polls real host CPU/memory from the main process; null outside Electron. */
@@ -128,9 +133,16 @@ function Stat({
   )
 }
 
-function StatStrip(): React.JSX.Element {
+function StatStrip({
+  metrics,
+  devices,
+  callsPerMin
+}: {
+  metrics: GatewayMetrics
+  devices: Device[]
+  callsPerMin: number
+}): React.JSX.Element {
   const { stats, history } = useHostStats()
-  const callsNow = devices.reduce((n, d) => n + rate(d), 0)
   const callsToday = devices.reduce((n, d) => n + d.callsToday, 0)
   const memPct = stats ? (stats.memUsed / stats.memTotal) * 100 : 0
 
@@ -152,26 +164,36 @@ function StatStrip(): React.JSX.Element {
           <div className="h-full rounded-full bg-status-online" style={{ width: `${memPct}%` }} />
         </div>
       </Stat>
-      <Stat label="Calls / min" value={String(callsNow)} sub={`${callsToday} today`} />
-      <Stat label="Latency p50" value={`${gateway.p50} ms`} sub={`p95 ${gateway.p95} ms`} />
+      <Stat label="Calls / min" value={String(callsPerMin)} sub={`${callsToday} today`} />
+      <Stat label="Latency p50" value={`${metrics.p50} ms`} sub={`p95 ${metrics.p95} ms`} />
       <Stat
         label="Denied · 24h"
-        value={String(gateway.denied24h)}
-        sub={`${devices.filter((d) => d.status === 'blocked').length} unknown device`}
+        value={String(metrics.denied24h)}
+        sub={`${devices.filter((d) => d.status === 'blocked').length} blocked device(s)`}
         tone="signal"
       />
-      <Stat label="Proxied" value={gateway.proxiedToday} sub="today" />
+      <Stat label="Proxied" value={String(metrics.proxiedToday)} sub="today" />
     </div>
   )
 }
 
 function Tree({
+  devices,
+  activity,
+  host,
   focus,
   onFocus
 }: {
+  devices: Device[]
+  activity: ActivityEvent[]
+  host: Host
   focus: Device
   onFocus: (d: Device) => void
 }): React.JSX.Element {
+  const H = Math.max(320, devices.length * ROW + 16)
+  const yHost = H / 2
+  const yDevice = (i: number): number => H / 2 + (i - (devices.length - 1) / 2) * ROW
+
   // Focused edge is drawn last so it sits on top.
   const order = devices.map((d, i) => ({ d, y: yDevice(i) }))
   order.sort((a, b) => Number(a.d === focus) - Number(b.d === focus))
@@ -180,7 +202,7 @@ function Tree({
     focus.status === 'online'
       ? `${rate(focus)} calls/min`
       : focus.status === 'blocked'
-        ? `${denied(focus)} denied`
+        ? `${denied(focus, activity)} denied`
         : null
 
   return (
@@ -193,7 +215,7 @@ function Tree({
       <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 size-full" aria-hidden>
         {order.map(({ d, y }) => {
           const s = stroke[d.status]
-          const path = edge(y)
+          const path = edge(yHost, y)
           const dur = Math.max(1.4, 5 - rate(d) / 4)
           return (
             <g
@@ -239,7 +261,7 @@ function Tree({
 
       <div
         className="absolute -translate-y-1/2 rounded-xl bg-host px-4 py-3 text-primary-foreground shadow-host"
-        style={{ left: pctX(HOST_X), top: pctY(yHost), width: pctX(HOST_W) }}
+        style={{ left: pctX(HOST_X), top: pctY(yHost, H), width: pctX(HOST_W) }}
       >
         <div className="truncate text-h3">{host.name}</div>
         <div className="mt-0.5 font-mono text-caption text-primary-foreground/60">
@@ -258,7 +280,7 @@ function Tree({
               ? 'border-status-blocked/30 text-status-blocked'
               : 'border-border text-status-online'
           }`}
-          style={{ left: pctX(PORT_L + BEND), top: pctY(fy) }}
+          style={{ left: pctX(PORT_L + BEND), top: pctY(fy, H) }}
         >
           {label}
         </span>
@@ -280,7 +302,7 @@ function Tree({
                 ? `${ring} shadow-card-focus ring-1`
                 : 'border-border opacity-55 hover:opacity-100'
             } ${d.status === 'blocked' && !focused ? 'border-dashed' : ''}`}
-            style={{ left: pctX(DEV_X), top: pctY(yDevice(i)), width: pctX(DEV_W) }}
+            style={{ left: pctX(DEV_X), top: pctY(yDevice(i), H), width: pctX(DEV_W) }}
           >
             <div className="flex items-center gap-2">
               <span className={`size-2 shrink-0 rounded-full ${dot[d.status]}`} />
@@ -336,13 +358,22 @@ const pill: Record<DeviceStatus, string> = {
   blocked: 'bg-status-blocked/12 text-status-blocked'
 }
 
-function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
+function DevicePanel({
+  device: d,
+  activity,
+  servers
+}: {
+  device: Device
+  activity: ActivityEvent[]
+  servers: Server[]
+}): React.JSX.Element {
   const live = d.status === 'online'
+  const serverNames = new Map(servers.map((s) => [s.id, s.name ?? s.id]))
   const cells: [string, string][] = [
     ['Calls / min', live ? String(rate(d)) : '—'],
     ['Latency', live ? `${d.latencyMs} ms` : '—'],
     ['Calls today', String(d.callsToday)],
-    ['Denied', String(denied(d))]
+    ['Denied', String(denied(d, activity))]
   ]
   return (
     <section className="glass-card flex h-full flex-col rounded-xl p-5">
@@ -358,7 +389,7 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
       <div className="mt-1 font-mono text-caption text-ink">
         {d.user} · {d.ip}
       </div>
-      <p className="mt-2 text-body text-ink">{statusLine(d)}</p>
+      <p className="mt-2 text-body text-ink">{statusLine(d, activity)}</p>
 
       <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
         {cells.map(([k, v]) => (
@@ -401,7 +432,7 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
                   key={s}
                   className="rounded border border-border px-1.5 font-mono text-caption text-ink-emphasis"
                 >
-                  {s}
+                  {serverNames.get(s) ?? s}
                 </span>
               ))
             ) : (
@@ -414,7 +445,7 @@ function DevicePanel({ device: d }: { device: Device }): React.JSX.Element {
   )
 }
 
-function Servers(): React.JSX.Element {
+function Servers({ servers }: { servers: Server[] }): React.JSX.Element {
   const running = servers.filter((s) => s.running).length
   return (
     <section className="glass-card rounded-xl">
@@ -442,7 +473,7 @@ function Servers(): React.JSX.Element {
                   <span
                     className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-status-online' : 'bg-status-offline'}`}
                   />
-                  <span className="font-mono text-body font-medium">{s.id}</span>
+                  <span className="font-mono text-body font-medium">{s.name ?? s.id}</span>
                   <span className="text-caption text-ink-muted">
                     {s.running ? s.transport : 'stopped'}
                   </span>
@@ -459,10 +490,10 @@ function Servers(): React.JSX.Element {
                 {s.running ? s.callsPerMin : '—'}
               </td>
               <td className="px-3 py-2.5 text-right tabular-nums">
-                {s.running ? `${s.cpu.toFixed(1)}%` : '—'}
+                {s.running && s.cpu !== null ? `${s.cpu.toFixed(1)}%` : '—'}
               </td>
               <td className="px-5 py-2.5 text-right tabular-nums">
-                {s.running ? `${s.memMb} MB` : '—'}
+                {s.running && s.memMb !== null ? `${s.memMb} MB` : '—'}
               </td>
             </tr>
           ))}
@@ -472,7 +503,13 @@ function Servers(): React.JSX.Element {
   )
 }
 
-function Activity({ focus }: { focus: Device }): React.JSX.Element {
+function Activity({
+  activity,
+  focus
+}: {
+  activity: ActivityEvent[]
+  focus: Device | null
+}): React.JSX.Element {
   return (
     <section className="glass-card rounded-xl">
       <div className="flex items-baseline justify-between px-5 pt-4">
@@ -482,7 +519,7 @@ function Activity({ focus }: { focus: Device }): React.JSX.Element {
       <ul className="mt-2 divide-y divide-border border-t border-border">
         {activity.slice(0, 8).map((e) => {
           const [server, tool] = e.tool.split('__')
-          const mine = e.deviceId === focus.id
+          const mine = focus ? e.deviceId === focus.id : false
           return (
             <li key={e.id} className="flex items-center gap-3 px-5 py-2 text-body-small">
               <span className="w-14 shrink-0 text-ink tabular-nums">{e.at}</span>
@@ -509,9 +546,14 @@ function Activity({ focus }: { focus: Device }): React.JSX.Element {
 }
 
 export default function Home(): React.JSX.Element {
-  const [focus, setFocus] = useState<Device>(
-    () => devices.find((d) => d.status === 'online') ?? devices[0]
-  )
+  const { devices, activity, servers, host, metrics, callsPerMin, available, error } =
+    useNetworkData()
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const focus =
+    devices.find((d) => d.id === focusId) ??
+    devices.find((d) => d.status === 'online') ??
+    devices[0] ??
+    null
   const online = devices.filter((d) => d.status === 'online').length
 
   return (
@@ -525,17 +567,31 @@ export default function Home(): React.JSX.Element {
           </p>
         </div>
         <div className="flex items-center gap-1.5 text-body-small text-ink">
-          <span className="size-1.5 rounded-full bg-status-online motion-safe:animate-breathe" />
-          Live · updates every 2s
+          <span
+            className={`size-1.5 rounded-full ${available ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
+          />
+          {available ? 'Live · updates every 2s' : 'Read-only · open the desktop app to connect'}
         </div>
       </div>
 
-      <StatStrip />
+      {error && (
+        <div className="mt-3 rounded-lg border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-body-small text-status-blocked">
+          Gateway unavailable: {error}
+        </div>
+      )}
+
+      <StatStrip metrics={metrics} devices={devices} callsPerMin={callsPerMin} />
 
       <div className="mt-4 grid grid-cols-12 gap-4">
         <div className="glass-card col-span-8 flex flex-col overflow-hidden rounded-xl">
           <div className="dot-grid flex flex-1 items-center">
-            <Tree focus={focus} onFocus={setFocus} />
+            {focus ? (
+              <Tree devices={devices} activity={activity} host={host} focus={focus} onFocus={(d) => setFocusId(d.id)} />
+            ) : (
+              <p className="w-full py-16 text-center text-body text-ink">
+                No devices yet. They appear here once a teammate calls a shared server.
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
             <span className="text-body-small text-ink">
@@ -545,16 +601,23 @@ export default function Home(): React.JSX.Element {
           </div>
         </div>
         <div className="col-span-4">
-          <DevicePanel device={focus} />
+          {focus ? (
+            <DevicePanel device={focus} activity={activity} servers={servers} />
+          ) : (
+            <section className="glass-card flex h-full flex-col rounded-xl p-5">
+              <h2 className="text-h3 text-ink-heading">No device selected</h2>
+              <p className="mt-2 text-body text-ink">Device details will appear here.</p>
+            </section>
+          )}
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-12 gap-4">
         <div className="col-span-6">
-          <Servers />
+          <Servers servers={servers} />
         </div>
         <div className="col-span-6">
-          <Activity focus={focus} />
+          <Activity activity={activity} focus={focus} />
         </div>
       </div>
     </>

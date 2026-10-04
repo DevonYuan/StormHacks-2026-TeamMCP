@@ -17,12 +17,14 @@ import { MCPClientManager } from './mcp/client.js'
 import { MCPProxyServer } from './mcp/server.js'
 import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
-import { ServerConfigSchema } from '../shared/protocol.js'
+import { ServerConfigSchema, TransportType } from '../shared/protocol.js'
 import { PolicyDocumentSchema } from '../shared/policy.js'
 import type { PolicyDocument } from '../shared/policy.js'
+import { normalizePeerUrl, peerHost } from '../shared/peer.js'
 import { resolveHealthStatus } from './health.js'
 import { ZodError } from 'zod'
 import type { ActivityQuery, ServerHealth } from '../shared/activity.js'
+import type { ShareInfo } from '../shared/types.js'
 import pino from 'pino'
 
 const logger = pino({ name: 'gateway' })
@@ -283,6 +285,12 @@ export class Gateway {
       case 'servers':
         return this.handleServersApi(req, res, id, action, ctx)
 
+      case 'share':
+        return this.handleShareApi(req, res, ctx)
+
+      case 'peers':
+        return this.handlePeersApi(req, res, id, ctx)
+
       case 'policy':
         return this.handlePolicyApi(req, res, ctx)
 
@@ -417,6 +425,127 @@ export class Gateway {
       default:
         sendJson(res, 404, { error: `Unknown action: ${action}` })
     }
+  }
+
+  /**
+   * Share info for the "expose" flow: what peers should connect to. (`GET /api/share`)
+   */
+  private async handleShareApi(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: HttpContext
+  ): Promise<void> {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { error: 'Method Not Allowed' })
+      return
+    }
+
+    const available = ctx.authManager.isTailscaleReady()
+    const info = available ? await ctx.authManager.getLocalInfo() : null
+    const status = ctx.proxyServer.getStatus()
+    const bindAddress = ctx.config.bindAddr
+    const localOnly =
+      bindAddress === '127.0.0.1' || bindAddress === '::1' || bindAddress === 'localhost'
+
+    const payload: ShareInfo = {
+      running: status.running,
+      address: `${bindAddress}:${ctx.config.port}`,
+      mcpUrl: `http://${bindAddress}:${ctx.config.port}/mcp`,
+      bindAddress,
+      port: ctx.config.port,
+      localOnly,
+      connectedPeers: status.activeSessions,
+      servers: ctx.repos.servers.getAll().length,
+      tailscale: {
+        available,
+        ip: info?.ip ?? null,
+        hostname: info?.hostname ?? null,
+        dnsName: info?.dnsName ?? null,
+      },
+    }
+
+    sendJson(res, 200, payload)
+  }
+
+  /**
+   * Peer gateways: register/probe a teammate's exposed gateway as a
+   * Streamable-HTTP upstream. (`POST /api/peers`, `DELETE /api/peers/:id`)
+   */
+  private async handlePeersApi(
+    req: IncomingMessage,
+    res: ServerResponse,
+    id: string | undefined,
+    ctx: HttpContext
+  ): Promise<void> {
+    const { repos, clientManager } = ctx
+
+    // /api/peers — add (or probe) a peer.
+    if (!id) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method Not Allowed' })
+        return
+      }
+
+      const body = await readJson(req)
+      const address = typeof body.address === 'string' ? body.address : ''
+      const probe = body.probe === true
+
+      let url: string
+      try {
+        url = normalizePeerUrl(address)
+      } catch (error) {
+        sendJson(res, 400, {
+          error: error instanceof Error ? error.message : 'Invalid peer address',
+        })
+        return
+      }
+
+      const host = peerHost(url)
+      const created = repos.servers.create({
+        name: `peer:${host}`,
+        transport: TransportType.StreamableHttp,
+        url,
+        enabled: true,
+        description: 'Remote Team MCP Gateway peer',
+      })
+
+      try {
+        await clientManager.connect(created)
+        repos.health.recordSuccess(created.id, 0)
+      } catch (error) {
+        await clientManager.disconnect(created.id).catch(() => undefined)
+        repos.servers.delete(created.id)
+        sendJson(res, 502, {
+          error: `Could not reach ${host}: ${error instanceof Error ? error.message : String(error)}`,
+        })
+        return
+      }
+
+      const tools = (clientManager.getConnection(created.id)?.tools ?? []).map((t) => ({
+        name: t.name,
+        description: t.description,
+      }))
+
+      // A probe validates reachability without keeping the peer registered.
+      if (probe) {
+        await clientManager.disconnect(created.id)
+        repos.servers.delete(created.id)
+        sendJson(res, 200, { success: true, probe: true, url, tools })
+        return
+      }
+
+      sendJson(res, 201, { success: true, url, tools, server: created })
+      return
+    }
+
+    // /api/peers/:id — remove a peer.
+    if (req.method !== 'DELETE') {
+      sendJson(res, 405, { error: 'Method Not Allowed' })
+      return
+    }
+    await clientManager.disconnect(id)
+    const ok = repos.servers.delete(id)
+    sendJson(res, 200, { success: ok })
   }
 
   private async handlePolicyApi(

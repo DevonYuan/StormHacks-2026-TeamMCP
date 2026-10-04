@@ -1,3 +1,5 @@
+import type { ServerConfig } from './protocol.js'
+
 export type DeviceStatus = 'online' | 'offline' | 'blocked'
 
 export interface HostStats {
@@ -22,13 +24,16 @@ export interface Host {
 
 export interface Server {
   id: string
-  transport: 'stdio' | 'http'
+  /** Friendly display name from the server config; fall back to `id`. */
+  name?: string
+  transport: 'stdio' | 'streamable-http' | 'sse'
   command: string
   running: boolean
   tools: number
   callsPerMin: number
-  cpu: number
-  memMb: number
+  /** null when the backend does not measure per-server resources. */
+  cpu: number | null
+  memMb: number | null
 }
 
 export interface Device {
@@ -58,4 +63,57 @@ export interface ActivityEvent {
   tool: string
   outcome: 'allowed' | 'denied'
   ms: number
+}
+
+/** Aggregate gateway metrics derived from the activity log. */
+export interface GatewayMetrics {
+  /** 50th percentile upstream call duration, ms. */
+  p50: number
+  /** 95th percentile upstream call duration, ms. */
+  p95: number
+  /** Denied calls in the last 24 hours. */
+  denied24h: number
+  /** Successful calls since local midnight. */
+  proxiedToday: number
+}
+
+/** Local tailnet info surfaced by the gateway (`/api/tailscale`). */
+export interface TailscaleInfo {
+  available: boolean
+  ip: string | null
+  hostname: string | null
+  dnsName: string | null
+}
+
+/** Canonical "what to share" info for exposing this gateway (`/api/share`). */
+export interface ShareInfo {
+  running: boolean
+  /** `host:port` peers should connect to. */
+  address: string
+  /** Full Streamable-HTTP endpoint peers register. */
+  mcpUrl: string
+  bindAddress: string
+  port: number
+  /** True when bound to loopback only (not reachable by peers). */
+  localOnly: boolean
+  /** Active MCP sessions on this gateway. */
+  connectedPeers: number
+  /** Number of registered upstream servers. */
+  servers: number
+  tailscale: TailscaleInfo
+}
+
+/** A tool discovered on a peer gateway. */
+export interface PeerTool {
+  name: string
+  description?: string
+}
+
+/** Result of adding (or probing) a peer gateway (`POST /api/peers`). */
+export interface AddPeerResult {
+  success: boolean
+  probe?: boolean
+  url: string
+  tools: PeerTool[]
+  server?: ServerConfig
 }

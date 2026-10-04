@@ -12,7 +12,7 @@
 
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
-import { spawn, ChildProcess } from "node:child_process";
+import { execFile, spawn, ChildProcess } from "node:child_process";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import {
   GatewayConfig,
@@ -32,7 +32,7 @@ import {
   ServerHealth,
   GatewayStatus,
 } from "../shared/activity.js";
-import type { HostStats } from "../shared/types.js";
+import type { AddPeerResult, HostStats, ShareInfo } from "../shared/types.js";
 import pino from "pino";
 
 const logger = pino({ name: "main" });
@@ -54,6 +54,7 @@ const IPC_CHANNELS = {
   GATEWAY_STOP: "gateway:stop",
   GATEWAY_STATUS: "gateway:status",
   GATEWAY_LOG: "gateway:log",
+  GATEWAY_EXPOSE: "gateway:expose",
 
   // Server management
   SERVERS_GET: "servers:get",
@@ -86,6 +87,11 @@ const IPC_CHANNELS = {
   // Tailscale
   TAILSCALE_STATUS: "tailscale:status",
   TAILSCALE_WHOIS: "tailscale:whois",
+
+  // Share / peers
+  SHARE_GET: "share:get",
+  PEERS_ADD: "peers:add",
+  PEERS_REMOVE: "peers:remove",
 
   // Real-time events (main -> renderer)
   EVENT_ACTIVITY: "event:activity",
@@ -278,20 +284,26 @@ function startGateway(): Promise<void> {
   });
 }
 
-function stopGateway(): void {
-  if (!gatewayProcess) return;
-
-  logger.info("Stopping gateway process...");
-  gatewayProcess.kill("SIGTERM");
-
-  // Force kill after 5 seconds
-  setTimeout(() => {
-    if (gatewayProcess) {
-      gatewayProcess.kill("SIGKILL");
-      gatewayProcess = null;
-      isGatewayRunning = false;
+function stopGateway(): Promise<void> {
+  return new Promise((resolve) => {
+    const proc = gatewayProcess;
+    if (!proc) {
+      resolve();
+      return;
     }
-  }, 5000);
+
+    logger.info("Stopping gateway process...");
+
+    const finish = (): void => resolve();
+    proc.once("exit", finish);
+    proc.once("error", finish);
+    proc.kill("SIGTERM");
+
+    // Force kill after 5 seconds if it hasn't exited.
+    setTimeout(() => {
+      if (gatewayProcess === proc) proc.kill("SIGKILL");
+    }, 5000);
+  });
 }
 
 function getGatewayStatus(): GatewayStatus {
@@ -319,7 +331,14 @@ async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Gateway request failed (${response.status}): ${text}`);
+    let message = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.error === "string") message = parsed.error;
+    } catch {
+      // keep the raw text
+    }
+    throw new Error(message || `Gateway request failed (${response.status})`);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -347,6 +366,37 @@ function hostStats(): HostStats {
   };
 }
 
+interface LocalTailnetInfo {
+  available: boolean;
+  ip: string | null;
+  hostname: string | null;
+  dnsName: string | null;
+}
+
+/** Read this machine's tailnet identity directly (independent of the gateway process). */
+function getLocalTailnet(): Promise<LocalTailnetInfo> {
+  return new Promise((resolve) => {
+    execFile("tailscale", ["status", "--json"], { timeout: 4000 }, (error, stdout) => {
+      if (error) {
+        resolve({ available: false, ip: null, hostname: null, dnsName: null });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
+        resolve({
+          available: ips.length > 0,
+          ip: ips[0] ?? null,
+          hostname: parsed?.Self?.HostName ?? null,
+          dnsName: parsed?.Self?.DNSName ?? null,
+        });
+      } catch {
+        resolve({ available: false, ip: null, hostname: null, dnsName: null });
+      }
+    });
+  });
+}
+
 // IPC Handlers
 function setupIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.HOST_STATS, hostStats);
@@ -358,7 +408,7 @@ function setupIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_STOP, async () => {
-    stopGateway();
+    await stopGateway();
     return { success: true };
   });
 
@@ -370,6 +420,22 @@ function setupIpcHandlers(): void {
     } catch {
       return getGatewayStatus();
     }
+  });
+
+  // Expose = bind the tailnet interface (when available) and (re)start the gateway.
+  ipcMain.handle(IPC_CHANNELS.GATEWAY_EXPOSE, async () => {
+    const tailnet = await getLocalTailnet();
+
+    // A running gateway keeps its old bind address, so restart to rebind.
+    if (gatewayProcess) await stopGateway();
+
+    if (tailnet.ip) {
+      gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, bindAddr: tailnet.ip });
+      appConfig = { ...appConfig, gateway: gatewayConfig };
+    }
+
+    await startGateway();
+    return { success: true, bindAddr: gatewayConfig.bindAddr, tailnet };
   });
 
   // Server management (proxied to the gateway control API)
@@ -556,6 +622,27 @@ function setupIpcHandlers(): void {
     return gatewayFetch(`/api/tailscale/whois?ip=${encodeURIComponent(ip)}`);
   });
 
+  // Share + peers
+  ipcMain.handle(IPC_CHANNELS.SHARE_GET, async () => {
+    return gatewayFetch<ShareInfo>("/api/share");
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PEERS_ADD,
+    async (_event, address: string, probe?: boolean) => {
+      return gatewayFetch<AddPeerResult>("/api/peers", {
+        method: "POST",
+        body: JSON.stringify({ address, probe: probe === true }),
+      });
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PEERS_REMOVE, async (_event, id: string) => {
+    return gatewayFetch<{ success: boolean }>(`/api/peers/${id}`, {
+      method: "DELETE",
+    });
+  });
+
   // External links
   ipcMain.on("shell:openExternal", (_event, url: string) => {
     void shell.openExternal(url);
@@ -590,7 +677,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  stopGateway();
+  void stopGateway();
 });
 
 // Handle protocol links (for OAuth callbacks, etc.)
