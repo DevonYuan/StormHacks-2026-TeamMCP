@@ -46,6 +46,8 @@ let gatewayConfig: GatewayConfig;
 let appConfig: AppConfig;
 let mainWindow: BrowserWindow | null = null;
 let isGatewayRunning = false;
+// Shared handle for an in-flight start so concurrent callers can't race.
+let gatewayStartPromise: Promise<void> | null = null;
 
 // IPC channel names
 const IPC_CHANNELS = {
@@ -152,12 +154,37 @@ function createWindow(): void {
 }
 
 // Gateway process management
+
+/**
+ * Start the gateway process, sharing a single in-flight attempt between callers.
+ *
+ * Callers (e.g. peers:add) assume that once this resolves the HTTP API is
+ * reachable. An earlier version resolved immediately whenever `gatewayProcess`
+ * was set and left the child running after a timeout, so a single failed start
+ * made every later call fetch a port nothing was listening on (ECONNREFUSED
+ * 127.0.0.1:8788).
+ */
 function startGateway(): Promise<void> {
+  if (isGatewayRunning && gatewayProcess) return Promise.resolve();
+  if (gatewayStartPromise) return gatewayStartPromise;
+
+  gatewayStartPromise = startGatewayProcess().finally(() => {
+    gatewayStartPromise = null;
+  });
+  return gatewayStartPromise;
+}
+
+function startGatewayProcess(): Promise<void> {
   return new Promise((resolve, reject) => {
+    // A handle left over from a previous failed attempt is dead to us.
     if (gatewayProcess) {
-      logger.warn("Gateway already running");
-      resolve();
-      return;
+      try {
+        gatewayProcess.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+      gatewayProcess = null;
+      isGatewayRunning = false;
     }
 
     logger.info("Starting gateway process...");
@@ -174,7 +201,7 @@ function startGateway(): Promise<void> {
     // Run the gateway with the system Node (it needs node:sqlite, ≥22.5). Spawning
     // `node --import tsx` directly — not `npx tsx` — keeps gatewayProcess as the real
     // process so SIGTERM kills it cleanly; an npx wrapper leaks the child (and the port).
-    gatewayProcess = spawn(
+    const child = spawn(
       "node",
       isDev ? ["--import", "tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
       {
@@ -190,8 +217,9 @@ function startGateway(): Promise<void> {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       },
     );
+    gatewayProcess = child;
 
-    gatewayProcess.stdout?.on("data", (data) => {
+    child.stdout?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
       for (const line of lines) {
         if (line) {
@@ -227,7 +255,7 @@ function startGateway(): Promise<void> {
       }
     });
 
-    gatewayProcess.stderr?.on("data", (data) => {
+    child.stderr?.on("data", (data) => {
       logger.error({ gateway: true }, data.toString());
       mainWindow?.webContents.send(IPC_CHANNELS.GATEWAY_LOG, {
         timestamp: Date.now(),
@@ -236,17 +264,20 @@ function startGateway(): Promise<void> {
       });
     });
 
+    let settled = false;
     let ready = false;
 
-    // Poll for readiness. Declared before the exit/error handlers so they can clear it.
+    // Poll for readiness. The callbacks close over stopPolling/fail/timeout, which
+    // are initialized synchronously before the first timer fires.
     const checkReady = setInterval(async () => {
       try {
         const response = await fetch(
           `http://${gatewayConfig.bindAddr}:${gatewayConfig.port}/health`,
         );
-        if (response.ok) {
-          clearInterval(checkReady);
+        if (response.ok && !settled) {
+          settled = true;
           ready = true;
+          stopPolling();
           isGatewayRunning = true;
           mainWindow?.webContents.send(
             IPC_CHANNELS.GATEWAY_STATUS,
@@ -259,29 +290,62 @@ function startGateway(): Promise<void> {
       }
     }, 500);
 
-    gatewayProcess.on("error", (error) => {
-      logger.error({ error }, "Gateway process error");
+    // Timeout after 10 seconds
+    const timeout = setTimeout(() => {
+      if (!ready) {
+        fail(
+          new Error(
+            "Gateway failed to start within 10 seconds. Check the gateway logs for the bind error.",
+          ),
+        );
+      }
+    }, 10000);
+
+    const stopPolling = (): void => {
       clearInterval(checkReady);
-      gatewayProcess = null;
-      isGatewayRunning = false;
-      mainWindow?.webContents.send(
-        IPC_CHANNELS.GATEWAY_STATUS,
-        getGatewayStatus(),
-      );
+      clearTimeout(timeout);
+    };
+
+    // Mark the attempt failed: stop polling, tear the child down, and reset state
+    // so the next start is a clean one.
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      stopPolling();
+      if (gatewayProcess === child) {
+        gatewayProcess = null;
+        isGatewayRunning = false;
+        mainWindow?.webContents.send(
+          IPC_CHANNELS.GATEWAY_STATUS,
+          getGatewayStatus(),
+        );
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
       reject(error);
+    };
+
+    child.on("error", (error) => {
+      logger.error({ error }, "Gateway process error");
+      fail(error instanceof Error ? error : new Error(String(error)));
     });
 
-    gatewayProcess.on("exit", (code, signal) => {
+    child.on("exit", (code, signal) => {
       logger.info({ code, signal }, "Gateway process exited");
-      clearInterval(checkReady);
-      gatewayProcess = null;
-      isGatewayRunning = false;
-      mainWindow?.webContents.send(
-        IPC_CHANNELS.GATEWAY_STATUS,
-        getGatewayStatus(),
-      );
+      stopPolling();
+      if (gatewayProcess === child) {
+        gatewayProcess = null;
+        isGatewayRunning = false;
+        mainWindow?.webContents.send(
+          IPC_CHANNELS.GATEWAY_STATUS,
+          getGatewayStatus(),
+        );
+      }
       if (!ready) {
-        reject(
+        fail(
           new Error(
             `Gateway exited before becoming ready (code ${code ?? "?"}${
               signal ? `, signal ${signal}` : ""
@@ -290,14 +354,6 @@ function startGateway(): Promise<void> {
         );
       }
     });
-
-    // Timeout after 10 seconds
-    setTimeout(() => {
-      clearInterval(checkReady);
-      if (!isGatewayRunning) {
-        reject(new Error("Gateway failed to start within 10 seconds"));
-      }
-    }, 10000);
   });
 }
 
@@ -433,34 +489,63 @@ interface LocalTailnetInfo {
   dnsName: string | null;
 }
 
+// The Tailscale GUI apps don't put their CLI on PATH, so probe the usual spots.
+const TAILSCALE_CLI_CANDIDATES = [
+  "tailscale",
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+  "/usr/local/bin/tailscale",
+  "/opt/homebrew/bin/tailscale",
+  "C:\\Program Files\\Tailscale\\tailscale.exe",
+  "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
+];
+
 /** Read this machine's tailnet identity directly (independent of the gateway process). */
 function getLocalTailnet(): Promise<LocalTailnetInfo> {
-  return new Promise((resolve) => {
-    const down = (state: string | null): void =>
-      resolve({ available: false, state, ip: null, hostname: null, dnsName: null });
-    execFile("tailscale", ["status", "--json"], { timeout: 4000 }, (error, stdout) => {
-      if (error) {
-        down(null);
+  const down = (state: string | null): LocalTailnetInfo => ({
+    available: false,
+    state,
+    ip: null,
+    hostname: null,
+    dnsName: null,
+  });
+
+  const attempt = (index: number): Promise<LocalTailnetInfo> =>
+    new Promise((resolve) => {
+      if (index >= TAILSCALE_CLI_CANDIDATES.length) {
+        resolve(down(null));
         return;
       }
-      try {
-        const parsed = JSON.parse(stdout);
-        const state: string = parsed?.BackendState ?? "Unknown";
-        const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
-        // The 100.x address is only bindable while the tunnel is actually up.
-        const up = state === "Running" && ips.length > 0;
-        resolve({
-          available: up,
-          state,
-          ip: up ? ips[0] : null,
-          hostname: parsed?.Self?.HostName ?? null,
-          dnsName: parsed?.Self?.DNSName ?? null,
-        });
-      } catch {
-        down(null);
-      }
+      execFile(
+        TAILSCALE_CLI_CANDIDATES[index],
+        ["status", "--json"],
+        { timeout: 4000 },
+        (error, stdout) => {
+          if (error) {
+            // Not usable (likely ENOENT) — try the next known location.
+            resolve(attempt(index + 1));
+            return;
+          }
+          try {
+            const parsed = JSON.parse(stdout);
+            const state: string = parsed?.BackendState ?? "Unknown";
+            const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
+            // The 100.x address is only bindable while the tunnel is actually up.
+            const up = state === "Running" && ips.length > 0;
+            resolve({
+              available: up,
+              state,
+              ip: up ? ips[0] : null,
+              hostname: parsed?.Self?.HostName ?? null,
+              dnsName: parsed?.Self?.DNSName ?? null,
+            });
+          } catch {
+            resolve(down(null));
+          }
+        },
+      );
     });
-  });
+
+  return attempt(0);
 }
 
 // IPC Handlers

@@ -19,7 +19,7 @@ import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
 import { ServerConfigSchema, TransportType } from '../shared/protocol.js'
 import { PolicyDocumentSchema } from '../shared/policy.js'
-import type { PolicyDocument } from '../shared/policy.js'
+import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
 import { normalizePeerUrl, peerHost } from '../shared/peer.js'
 import { resolveHealthStatus } from './health.js'
 import { ZodError } from 'zod'
@@ -97,27 +97,44 @@ export class Gateway {
     const policyDoc = repos.policy.get()
     const policyEngine = new PolicyEngine(policyDoc)
 
-    // Seed a bootstrap policy on first run so local development works out of the box.
-    if (policyDoc.rules.length === 0) {
+    // Ensure the bootstrap policy rules exist so local development and tailnet
+    // teammates work out of the box. This is idempotent, so a database created by
+    // an older build also picks up newly added defaults.
+    const bootstrapRules: PolicyRule[] = [
+      {
+        id: 'bootstrap-local',
+        name: 'Bootstrap: local development',
+        identities: [{ user: 'local@dev', device: '', deviceId: '', tailnet: '' }],
+        effect: 'allow',
+        priority: 100,
+        description:
+          'Allows the local loopback identity full access. Edit or remove in the Policy page.',
+      },
+      {
+        id: 'bootstrap-tailnet',
+        name: 'Bootstrap: tailnet peers',
+        // An empty identity list matches any authenticated identity.
+        identities: [],
+        effect: 'allow',
+        priority: 90,
+        description:
+          'Allows teammates who authenticated over the tailnet. Add higher-priority deny rules to restrict.',
+      },
+    ]
+
+    const missingRules = bootstrapRules.filter(
+      rule => !policyDoc.rules.some(existing => existing.id === rule.id)
+    )
+    if (missingRules.length > 0) {
       const seeded: PolicyDocument = {
         ...policyDoc,
-        rules: [
-          {
-            id: 'bootstrap-local',
-            name: 'Bootstrap: local development',
-            identities: [{ user: 'local@dev', device: '', deviceId: '', tailnet: '' }],
-            effect: 'allow',
-            priority: 100,
-            description:
-              'Allows the local loopback identity full access. Edit or remove in the Policy page.',
-          },
-        ],
+        rules: [...policyDoc.rules, ...missingRules],
         updatedAt: Date.now(),
         updatedBy: 'system',
       }
       repos.policy.set(seeded)
       policyEngine.updatePolicy(seeded)
-      logger.info('Seeded bootstrap local policy')
+      logger.info({ rules: missingRules.map(r => r.id) }, 'Seeded bootstrap policy rules')
     }
 
     // Initialize MCP client manager

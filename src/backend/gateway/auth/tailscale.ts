@@ -4,28 +4,36 @@
  */
 
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { GatewayConfig } from '../../shared/config.js'
 import { Identity } from '../../shared/policy.js'
 
+interface TailscaleUser {
+  ID: number
+  LoginName: string
+  DisplayName: string
+  ProfilePicURL?: string
+}
+
+interface TailscaleNodeInfo {
+  ID: string
+  StableID?: string
+  UserID?: number
+  PublicKey?: string
+  HostName: string
+  DNSName: string
+  TailscaleIPs: string[]
+  Tags?: string[]
+  Online?: boolean
+  LastSeen?: string
+}
+
 interface TailscaleStatus {
-  Self: {
-    ID: string
-    PublicKey: string
-    HostName: string
-    DNSName: string
-    TailscaleIPs: string[]
-    Tags: string[]
-  }
-  Peer: Record<string, {
-    ID: string
-    PublicKey: string
-    HostName: string
-    DNSName: string
-    TailscaleIPs: string[]
-    Tags: string[]
-    Online: boolean
-    LastSeen: string
-  }>
+  BackendState?: string
+  MagicDNSSuffix?: string
+  Self: TailscaleNodeInfo
+  Peer?: Record<string, TailscaleNodeInfo>
+  User?: Record<string, TailscaleUser>
 }
 
 interface TailscaleWhois {
@@ -45,6 +53,16 @@ interface TailscaleWhois {
 
 let tailscaleCliPath: string | null = null
 
+// The Tailscale macOS/Windows GUI apps do not add their CLI to PATH, so probe the
+// usual install locations before falling back to a bare `tailscale` lookup.
+const TAILSCALE_CLI_CANDIDATES = [
+  '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+  '/usr/local/bin/tailscale',
+  '/opt/homebrew/bin/tailscale',
+  'C:\\Program Files\\Tailscale\\tailscale.exe',
+  'C:\\Program Files (x86)\\Tailscale\\tailscale.exe',
+]
+
 export function setTailscaleCli(path: string): void {
   tailscaleCliPath = path
 }
@@ -52,6 +70,9 @@ export function setTailscaleCli(path: string): void {
 function getTailscaleCli(config: GatewayConfig): string {
   if (tailscaleCliPath) return tailscaleCliPath
   if (config.tailscaleCli) return config.tailscaleCli
+  for (const candidate of TAILSCALE_CLI_CANDIDATES) {
+    if (existsSync(candidate)) return candidate
+  }
   return 'tailscale'
 }
 
@@ -77,7 +98,8 @@ export async function getTailscaleStatus(config: GatewayConfig): Promise<Tailsca
 }
 
 export async function getTailscaleWhois(ip: string, config: GatewayConfig): Promise<TailscaleWhois> {
-  const output = await runTailscale(['whois', ip], config)
+  // `whois` is human-readable by default; `--json` is required to parse it.
+  const output = await runTailscale(['whois', '--json', ip], config)
   return JSON.parse(output)
 }
 
@@ -89,13 +111,23 @@ export async function resolveIdentityFromIp(clientIp: string, config: GatewayCon
       return null
     }
 
-    const whois = await getTailscaleWhois(clientIp, config)
+    // `tailscale whois --json` does not include a UserProfile, so resolve the
+    // identity from `tailscale status --json`: find the node owning the IP, then
+    // map its UserID through the top-level User map for the login name.
+    const status = await getTailscaleStatus(config)
+    const nodes: TailscaleNodeInfo[] = [status.Self, ...Object.values(status.Peer ?? {})]
+    const node = nodes.find(n => (n.TailscaleIPs ?? []).includes(clientIp))
+    if (!node) return null
+
+    const user = node.UserID != null ? status.User?.[String(node.UserID)] : undefined
+    const loginName = user?.LoginName
+    if (!loginName) return null
 
     return {
-      user: whois.Node.UserProfile.LoginName,
-      device: whois.Node.Name,
-      deviceId: whois.Node.ID,
-      tailnet: whois.Node.UserProfile.LoginName.split('@')[1] || 'unknown',
+      user: loginName,
+      device: (node.DNSName || node.HostName || '').replace(/\.$/, ''),
+      deviceId: String(node.ID ?? node.StableID ?? ''),
+      tailnet: loginName.split('@')[1] || status.MagicDNSSuffix || 'unknown',
     }
   } catch (error) {
     console.warn(`Failed to resolve identity for ${clientIp}:`, error)
