@@ -1,4 +1,4 @@
-# Team MCP Gateway
+# Tether
 
 > **Share your local MCP ecosystem with your team — without redeploying it to the cloud.**
 
@@ -20,7 +20,7 @@
 
 ## 1. What It Is
 
-**Team MCP Gateway** is a local-first desktop application that lets a small team securely share access to [MCP](https://modelcontextprotocol.io) servers already running on one teammate's machine.
+**Tether** is a local-first desktop application that lets a small team securely share access to [MCP](https://modelcontextprotocol.io) servers already running on one teammate's machine.
 
 The gateway **defines no MCP tools of its own**. It sits in front of MCP servers you already run locally and adds a secure, team-oriented access layer around them:
 
@@ -39,7 +39,7 @@ The gateway **defines no MCP tools of its own**. It sits in front of MCP servers
                            │ Secure Connection (Tailscale / LAN)
                            ▼
                 ┌─────────────────────┐
-                │   Team MCP Gateway  │
+                │       Tether        │
                 │                     │
                 │ Authentication      │
                 │ Authorization       │
@@ -397,7 +397,7 @@ Point Inspector at the gateway's aggregated Streamable HTTP endpoint (`http://lo
 ```json
 {
   "servers": {
-    "team-gateway": {
+    "tether": {
       "type": "http",
       "url": "http://localhost:8788/mcp"
     }
@@ -619,4 +619,4 @@ Beyond the documented trade-offs, these are the sharp edges we expect to hit.
 
 ---
 
-<p align="center"><em>Team MCP Gateway — share your local MCP ecosystem with your team.</em></p>
+<p align="center"><em>Tether — share your local MCP ecosystem with your team.</em></p>
