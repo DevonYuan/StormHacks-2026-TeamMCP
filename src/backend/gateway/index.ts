@@ -20,11 +20,9 @@ import { PolicyEngine } from './authz/policy.js'
 import { ServerConfigSchema } from '../shared/protocol.js'
 import { PolicyDocumentSchema } from '../shared/policy.js'
 import type { PolicyDocument } from '../shared/policy.js'
-import type {
-  ActivityQuery,
-  ServerHealth,
-  ServerHealthStatus,
-} from '../shared/activity.js'
+import { resolveHealthStatus } from './health.js'
+import { ZodError } from 'zod'
+import type { ActivityQuery, ServerHealth } from '../shared/activity.js'
 import pino from 'pino'
 
 const logger = pino({ name: 'gateway' })
@@ -222,6 +220,21 @@ export class Gateway {
 
       sendJson(res, 404, { error: 'Not Found' })
     } catch (error) {
+      // Client-side errors (schema validation / malformed body) must not surface as 500.
+      if (error instanceof ZodError) {
+        logger.warn({ path, issues: error.issues }, 'Request validation failed')
+        if (!res.headersSent) {
+          sendJson(res, 400, { error: 'Validation failed', issues: error.issues })
+        }
+        return
+      }
+      if (error instanceof SyntaxError) {
+        logger.warn({ path, error: error.message }, 'Malformed request body')
+        if (!res.headersSent) {
+          sendJson(res, 400, { error: 'Malformed JSON body' })
+        }
+        return
+      }
       logger.error({ error, path }, 'Request failed')
       if (!res.headersSent) {
         sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
@@ -467,16 +480,17 @@ export class Gateway {
 
     return ctx.repos.servers.getAll().map((server) => {
       const existing = records.get(server.id)
-      const status: ServerHealthStatus = connected.has(server.id)
-        ? 'healthy'
-        : existing?.status ?? 'unknown'
+      const isConnected = connected.has(server.id)
+      const status = resolveHealthStatus(isConnected, existing)
+      const isFailing = status === 'unhealthy' || status === 'degraded'
+
       return {
         serverId: server.id,
         status,
         lastCheck: existing?.lastCheck,
-        latencyMs: existing?.latencyMs,
-        error: connected.has(server.id) ? undefined : existing?.error,
-        consecutiveFailures: existing?.consecutiveFailures ?? 0,
+        latencyMs: isConnected ? existing?.latencyMs : undefined,
+        error: isFailing ? existing?.error : undefined,
+        consecutiveFailures: isFailing ? existing?.consecutiveFailures ?? 0 : 0,
       }
     })
   }
