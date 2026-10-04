@@ -17,6 +17,7 @@ import { MCPClientManager } from './mcp/client.js'
 import { MCPProxyServer } from './mcp/server.js'
 import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
+import { getTailnetDevices, getTailscaleWhois } from './auth/tailscale.js'
 import { ServerConfigSchema, TransportType } from '../shared/protocol.js'
 import { PolicyDocumentSchema } from '../shared/policy.js'
 import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
@@ -336,6 +337,41 @@ export class Gateway {
 
       case 'tailscale': {
         if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method Not Allowed' })
+
+        // /api/tailscale/devices — every node on the tailnet (Self + Peer).
+        if (id === 'devices') {
+          if (!ctx.authManager.isTailscaleReady()) {
+            sendJson(res, 200, { available: false, self: null, devices: [] })
+            return
+          }
+          try {
+            const nodes = await getTailnetDevices(ctx.config)
+            sendJson(res, 200, {
+              available: true,
+              self: nodes.find((node) => node.self) ?? null,
+              devices: nodes.filter((node) => !node.self),
+            })
+          } catch (error) {
+            logger.warn({ error }, 'Failed to enumerate tailnet devices')
+            sendJson(res, 200, { available: false, self: null, devices: [] })
+          }
+          return
+        }
+
+        // /api/tailscale/whois?ip=… — resolve a single IP to its tailnet node.
+        if (id === 'whois') {
+          const ip = url.searchParams.get('ip')
+          if (!ip) return sendJson(res, 400, { error: 'Missing ip query parameter' })
+          try {
+            sendJson(res, 200, await getTailscaleWhois(ip, ctx.config))
+          } catch (error) {
+            sendJson(res, 502, {
+              error: `whois failed for ${ip}: ${error instanceof Error ? error.message : String(error)}`,
+            })
+          }
+          return
+        }
+
         const available = ctx.authManager.isTailscaleReady()
         const info = available ? await ctx.authManager.getLocalInfo() : null
         sendJson(res, 200, {

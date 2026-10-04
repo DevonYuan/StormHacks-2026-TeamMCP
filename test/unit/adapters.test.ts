@@ -3,6 +3,7 @@ import { TransportType } from '@shared/protocol'
 import type { ServerConfig } from '@shared/protocol'
 import type { ActivityEntry, GatewayStatus, ServerHealth } from '@shared/activity'
 import type { Identity, PolicyDocument, PolicyRule } from '@shared/policy'
+import type { TailnetDevice, TailnetDevicesResponse } from '@shared/types'
 import {
   accessibleServers,
   countCallsPerMinute,
@@ -12,6 +13,7 @@ import {
   toDevices,
   toGatewayMetrics,
   toHost,
+  toMachines,
   toServers,
 } from '../../src/frontend/renderer/src/data/adapters.js'
 
@@ -280,6 +282,137 @@ describe('adapters', () => {
       expect(formatUptime(2 * 3600_000 + 14 * 60_000)).toBe('2h 14m')
       expect(formatUptime(5 * 60_000)).toBe('5m')
       expect(formatUptime(42_000)).toBe('42s')
+    })
+  })
+
+  describe('toMachines', () => {
+    const now = new Date(2026, 0, 2, 12, 0, 0).getTime()
+    const status: GatewayStatus = {
+      running: true,
+      uptimeMs: 1_000,
+      boundAddress: '127.0.0.1',
+      port: 8788,
+      connectedPeers: 0,
+      totalRequests: 0,
+      activeSessions: 0,
+    }
+    const allowAll = policy([rule({ id: 'allow-all' })], 'allow')
+
+    function tDevice(over: Partial<TailnetDevice> = {}): TailnetDevice {
+      return {
+        id: 'node-1',
+        stableId: 'stable-1',
+        hostname: 'alice-mac',
+        dnsName: 'alice-mac.tailnet.ts.net.',
+        ips: ['100.64.0.5'],
+        online: true,
+        lastSeen: null,
+        os: 'macOS',
+        tags: [],
+        user: 'alice@tailnet',
+        self: false,
+        ...over,
+      }
+    }
+
+    function tailnet(
+      over: Partial<TailnetDevicesResponse> = {}
+    ): TailnetDevicesResponse {
+      return { available: true, self: null, devices: [], ...over }
+    }
+
+    it('lists Self and peers with tailnet IPs and identity', () => {
+      const machines = toMachines(
+        tailnet({
+          self: tDevice({
+            id: 'self',
+            hostname: 'devon-mac',
+            dnsName: 'devon-mac.ts.net.',
+            user: 'devon@tailnet',
+            self: true,
+          }),
+          devices: [tDevice()],
+        }),
+        status,
+        [],
+        allowAll,
+        ['s1'],
+        now
+      )
+
+      const self = machines.find((m) => m.badge === 'Local')!
+      expect(self.name).toBe('devon-mac')
+      expect(self.gatewayId).toBe('127.0.0.1:8788')
+      expect(self.status).toBe('connected')
+
+      const peer = machines.find((m) => m.id === 'tailnet:node-1')!
+      expect(peer.ip).toBe('100.64.0.5')
+      expect(peer.subtitle).toBe('alice@tailnet · tailnet')
+      expect(peer.status).toBe('connected')
+    })
+
+    it('marks a peer denied when the policy grants no servers', () => {
+      const machines = toMachines(
+        tailnet({ devices: [tDevice()] }),
+        status,
+        [],
+        policy([], 'deny'),
+        ['s1'],
+        now
+      )
+      expect(machines.find((m) => m.id === 'tailnet:node-1')!.status).toBe('denied')
+    })
+
+    it('keeps activity-only identities with an unknown IP', () => {
+      const machines = toMachines(
+        tailnet({ self: tDevice({ id: 'self', self: true }) }),
+        status,
+        [mkEntry({ timestamp: now - 1_000, identity: BOB })],
+        allowAll,
+        ['s1'],
+        now
+      )
+      const bob = machines.find((m) => m.name === 'bob')!
+      expect(bob.ip).toBe('—')
+      expect(bob.badge).toBe('Peer')
+    })
+
+    it('does not duplicate the loopback identity when Self is present', () => {
+      const local = mkEntry({
+        timestamp: now - 1_000,
+        identity: {
+          user: 'local@dev',
+          device: 'localhost',
+          deviceId: 'local-dev-device',
+          tailnet: 'local',
+        },
+      })
+      const machines = toMachines(
+        tailnet({ self: tDevice({ id: 'self', self: true }) }),
+        status,
+        [local],
+        allowAll,
+        ['s1'],
+        now
+      )
+      expect(machines.filter((m) => m.badge === 'Local')).toHaveLength(1)
+    })
+
+    it('falls back to a local gateway row when Tailscale is unavailable', () => {
+      const machines = toMachines(
+        tailnet({ available: false }),
+        status,
+        [],
+        allowAll,
+        ['s1'],
+        now
+      )
+      expect(machines).toHaveLength(1)
+      expect(machines[0]).toMatchObject({
+        id: 'local-gateway',
+        status: 'connected',
+        badge: 'Local',
+      })
     })
   })
 })

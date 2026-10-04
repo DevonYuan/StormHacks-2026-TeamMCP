@@ -6,7 +6,7 @@
  * (e.g. the renderer opened in a plain browser) or the gateway is not running.
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ActivityEntry, ActivityStats, GatewayStatus, ServerHealth } from '@shared/activity'
 import type { PolicyDocument } from '@shared/policy'
@@ -17,8 +17,10 @@ import type {
   Device,
   GatewayMetrics,
   Host,
+  Machine,
   Server,
   ShareInfo,
+  TailnetDevicesResponse,
   TailscaleInfo,
 } from '@shared/types'
 import {
@@ -27,6 +29,7 @@ import {
   toDevices,
   toGatewayMetrics,
   toHost,
+  toMachines,
   toServers,
 } from './adapters'
 
@@ -41,6 +44,7 @@ const EMPTY_POLICY: PolicyDocument = {
 }
 
 const EMPTY_TAILSCALE: TailscaleInfo = { available: false, ip: null, hostname: null, dnsName: null }
+const EMPTY_TAILNET_DEVICES: TailnetDevicesResponse = { available: false, self: null, devices: [] }
 
 interface Snapshot {
   status: GatewayStatus | null
@@ -50,6 +54,7 @@ interface Snapshot {
   policy: PolicyDocument
   stats: ActivityStats | null
   tailscale: TailscaleInfo
+  tailnetDevices: TailnetDevicesResponse
 }
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -60,6 +65,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   policy: EMPTY_POLICY,
   stats: null,
   tailscale: EMPTY_TAILSCALE,
+  tailnetDevices: EMPTY_TAILNET_DEVICES,
 }
 
 export interface NetworkData {
@@ -69,12 +75,18 @@ export interface NetworkData {
   host: Host
   servers: Server[]
   devices: Device[]
+  /** Machine rows for the Machines page (tailnet nodes merged with activity). */
+  machines: Machine[]
   activity: ActivityEvent[]
   metrics: GatewayMetrics
   callsPerMin: number
+  /** Denied (403) calls seen in the activity log. */
+  authFailures: number
   status: GatewayStatus | null
   tailscale: TailscaleInfo
   updatedAt: number
+  /** Force an immediate re-fetch instead of waiting for the next poll. */
+  refresh: () => Promise<void>
   startGateway: () => Promise<void>
   stopGateway: () => Promise<void>
   /** Bind the tailnet interface (when available) and start the gateway so peers can connect. */
@@ -99,15 +111,17 @@ async function loadSnapshot(): Promise<Snapshot> {
   const api = window.electronAPI
   if (!api) return EMPTY_SNAPSHOT
 
-  const [status, servers, health, activity, policy, stats, tailscale] = await Promise.all([
-    settle(api.gateway.getStatus()),
-    settle(api.servers.getAll()),
-    settle(api.health.getAll()),
-    settle(api.activity.query({ limit: 200 })),
-    settle(api.policy.get()),
-    settle(api.activity.getStats()),
-    settle(api.tailscale.getStatus()),
-  ])
+  const [status, servers, health, activity, policy, stats, tailscale, tailnetDevices] =
+    await Promise.all([
+      settle(api.gateway.getStatus()),
+      settle(api.servers.getAll()),
+      settle(api.health.getAll()),
+      settle(api.activity.query({ limit: 200 })),
+      settle(api.policy.get()),
+      settle(api.activity.getStats()),
+      settle(api.tailscale.getStatus()),
+      settle(api.tailscale.getDevices()),
+    ])
 
   return {
     status,
@@ -117,6 +131,7 @@ async function loadSnapshot(): Promise<Snapshot> {
     policy: policy ?? EMPTY_POLICY,
     stats,
     tailscale: tailscale ?? EMPTY_TAILSCALE,
+    tailnetDevices: tailnetDevices ?? EMPTY_TAILNET_DEVICES,
   }
 }
 
@@ -124,26 +139,21 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let alive = true
-    const run = async (): Promise<void> => {
-      try {
-        const next = await loadSnapshot()
-        if (alive) {
-          setSnapshot(next)
-          setError(null)
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e))
-      }
-    }
-    void run()
-    const id = setInterval(() => void run(), POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(id)
+  const reload = useCallback(async (): Promise<void> => {
+    try {
+      const next = await loadSnapshot()
+      setSnapshot(next)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }, [])
+
+  useEffect(() => {
+    void reload()
+    const id = setInterval(() => void reload(), POLL_MS)
+    return () => clearInterval(id)
+  }, [reload])
 
   const data = useMemo<NetworkData>(() => {
     const now = Date.now()
@@ -154,12 +164,24 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
       host: toHost(snapshot.tailscale, snapshot.status, snapshot.servers.length),
       servers: toServers(snapshot.servers, snapshot.health, snapshot.activity, now),
       devices: toDevices(snapshot.activity, snapshot.policy, allServerIds, now),
+      machines: toMachines(
+        snapshot.tailnetDevices,
+        snapshot.status,
+        snapshot.activity,
+        snapshot.policy,
+        allServerIds,
+        now
+      ),
       activity: toActivityEvents(snapshot.activity),
       metrics: toGatewayMetrics(snapshot.activity, now),
       callsPerMin: countCallsPerMinute(snapshot.activity, now),
+      authFailures:
+        snapshot.stats?.errorsByCode?.['403'] ??
+        snapshot.activity.filter((e) => e.errorCode === 403).length,
       status: snapshot.status,
       tailscale: snapshot.tailscale,
       updatedAt: now,
+      refresh: reload,
       startGateway: async () => {
         await window.electronAPI?.gateway.start()
       },
@@ -190,7 +212,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         return api.peers.remove(id)
       },
     }
-  }, [snapshot, error])
+  }, [snapshot, error, reload])
 
   return <NetworkDataContext.Provider value={data}>{children}</NetworkDataContext.Provider>
 }
