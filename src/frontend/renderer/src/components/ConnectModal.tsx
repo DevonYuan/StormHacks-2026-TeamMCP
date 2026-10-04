@@ -10,7 +10,7 @@ export function ConnectModal({
   open: boolean
   onClose: () => void
 }): React.JSX.Element {
-  const { available, servers, addPeer, probePeer, removePeer } = useNetworkData()
+  const { available, servers, addPeer, probePeer, removePeer, refresh } = useNetworkData()
   const [address, setAddress] = useState('')
   const [busy, setBusy] = useState<null | 'test' | 'connect'>(null)
   const [error, setError] = useState<string | null>(null)
@@ -23,13 +23,17 @@ export function ConnectModal({
     setError(null)
     setOk(null)
     try {
-      const result = mode === 'test' ? await probePeer(address) : await addPeer(address)
-      setOk(
-        mode === 'test'
-          ? `Reachable — ${result.tools.length} tool(s) available`
-          : `Connected — ${result.tools.length} tool(s) from ${result.url}`
-      )
-      if (mode === 'connect') setAddress('')
+      // Test reachability before registering. A failed handshake must not land in
+      // Connected peers, even briefly.
+      const probed = await probePeer(address)
+      if (mode === 'test') {
+        setOk(`Reachable — ${probed.tools.length} tool(s) available`)
+        return
+      }
+      const result = await addPeer(address)
+      await refresh()
+      setOk(`Connected — ${result.tools.length} tool(s) from ${result.url}`)
+      setAddress('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -80,7 +84,7 @@ export function ConnectModal({
             disabled={!address.trim() || busy !== null}
             className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
           >
-            {busy === 'connect' ? 'Connecting…' : 'Connect'}
+            {busy === 'connect' ? 'Testing connection…' : 'Connect'}
           </button>
 
           {error && <p className="text-xs text-status-blocked">{error}</p>}

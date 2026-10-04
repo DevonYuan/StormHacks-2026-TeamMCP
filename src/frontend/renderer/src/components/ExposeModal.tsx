@@ -35,6 +35,12 @@ function Field({
   )
 }
 
+/** Electron wraps IPC errors as "Error invoking remote method 'x': Error: msg". */
+function message(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  return raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
+
 /** "Open a connection": expose this gateway to the tailnet. */
 export function ExposeModal({
   open,
@@ -43,8 +49,7 @@ export function ExposeModal({
   open: boolean
   onClose: () => void
 }): React.JSX.Element {
-  const { available, status, servers, expose, stopGateway, getShare } = useNetworkData()
-  const [busy, setBusy] = useState(false)
+  const { available, status, servers, opening, expose, stopGateway, getShare } = useNetworkData()
   const [share, setShare] = useState<ShareInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -66,17 +71,16 @@ export function ExposeModal({
     return () => {
       alive = false
     }
-  }, [open, available, running, getShare])
+    // Re-read after a rebind. `running` alone stays true, so the old share kept
+    // the Expose button on screen after the gateway had already moved off loopback.
+  }, [open, available, running, status?.boundAddress, getShare])
 
-  const start = async (): Promise<void> => {
-    setBusy(true)
+  const exposeServers = async (): Promise<void> => {
     setError(null)
     try {
       await expose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+      setError(message(e))
     }
   }
 
@@ -86,7 +90,8 @@ export function ExposeModal({
 
   const address = share?.address ?? `${status?.boundAddress ?? '127.0.0.1'}:${status?.port ?? 8788}`
   const mcpUrl = share?.mcpUrl ?? `http://${address}/mcp`
-  const exposed = Boolean(share && !share.localOnly)
+  const bindAddress = status?.boundAddress || share?.bindAddress || ''
+  const exposed = bindAddress !== '' && !['127.0.0.1', '::1', 'localhost'].includes(bindAddress)
 
   return (
     <Modal
@@ -98,13 +103,22 @@ export function ExposeModal({
       {!available ? (
         <p className="text-sm text-ink-muted">Open the desktop app to expose your servers.</p>
       ) : !running ? (
-        <button
-          onClick={() => void start()}
-          disabled={busy}
-          className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-        >
-          {busy ? 'Opening…' : 'Expose servers'}
-        </button>
+        opening ? (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-ink"
+          >
+            <span className="size-2 rounded-full bg-brand motion-safe:animate-pulse" />
+            Opening gateway connection…
+          </div>
+        ) : (
+          <button
+            onClick={() => void exposeServers()}
+            className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Expose servers
+          </button>
+        )
       ) : (
         <div className="space-y-3">
           <div
@@ -120,11 +134,11 @@ export function ExposeModal({
 
           {!exposed && (
             <button
-              onClick={() => void start()}
-              disabled={busy}
-              className="w-full rounded-lg bg-signal px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={() => void exposeServers()}
+              disabled={opening}
+              className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
             >
-              {busy ? 'Exposing…' : 'Expose to tailnet'}
+              {opening ? 'Opening gateway connection…' : 'Expose to tailnet'}
             </button>
           )}
 

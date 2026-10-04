@@ -151,6 +151,17 @@ export class ServerRepository {
     return fullConfig
   }
 
+  /** Insert a server that already has an id, so a live connection can be persisted under that id. */
+  save(config: ServerConfig): ServerConfig {
+    const row = this.configToRow(config)
+    const stmt = this.db.prepare(`
+      INSERT INTO servers (id, name, transport, command, args, env, cwd, url, headers, enabled, description, created_at, updated_at)
+      VALUES (@id, @name, @transport, @command, @args, @env, @cwd, @url, @headers, @enabled, @description, @created_at, @updated_at)
+    `)
+    stmt.run(row)
+    return config
+  }
+
   update(id: string, updates: Partial<Omit<ServerConfig, 'id' | 'createdAt'>>): ServerConfig | undefined {
     const existing = this.getById(id)
     if (!existing) return undefined

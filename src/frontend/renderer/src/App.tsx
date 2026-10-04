@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Home from './pages/Home'
 import Machines from './pages/Machines'
 import Settings from './pages/Settings'
@@ -7,20 +7,6 @@ import { ConnectModal } from './components/ConnectModal'
 import { ExposeModal } from './components/ExposeModal'
 
 type Page = 'Network' | 'Machines' | 'Settings'
-type Theme = 'light' | 'dark'
-
-/** Light by default; the choice persists across launches. */
-function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'
-  )
-  // Layout effect so the class is set before first paint — no light flash on a dark launch.
-  useLayoutEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    localStorage.setItem('theme', theme)
-  }, [theme])
-  return [theme, () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))]
-}
 
 // Fixed order, used for the ⌘1/⌘2/⌘3 shortcuts.
 const PAGES: Page[] = ['Network', 'Machines', 'Settings']
@@ -63,8 +49,7 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
 }
 
 function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
-  const { devices, servers, host, status, startGateway, stopGateway } = useNetworkData()
-  const [theme, toggleTheme] = useTheme()
+  const { devices, servers, host, status, opening, startGateway, stopGateway } = useNetworkData()
   const running = status?.running ?? false
   const blocked = devices.filter((d) => d.status === 'blocked').length
   const online = devices.filter((d) => d.status === 'online').length
@@ -79,31 +64,6 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
     <aside className="row-span-2 flex flex-col border-r border-border bg-surface-sidebar px-3 py-5">
       <div className="flex items-center gap-2 px-2">
         <img src="./logo.png" alt="Tether" className="h-10 w-auto" />
-        {/* <button
-          onClick={toggleTheme}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-          className="ml-auto rounded-md p-1.5 text-ink hover:bg-surface-muted hover:text-ink-emphasis focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <svg
-            viewBox="0 0 20 20"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden
-          >
-            {theme === 'dark' ? (
-              <>
-                <circle cx="10" cy="10" r="3.5" />
-                <path d="M10 2v1.5M10 16.5V18M2 10h1.5M16.5 10H18M4.3 4.3l1.1 1.1M14.6 14.6l1.1 1.1M4.3 15.7l1.1-1.1M14.6 5.4l1.1-1.1" />
-              </>
-            ) : (
-              <path d="M16.5 12.5A7 7 0 0 1 7.5 3.5a7 7 0 1 0 9 9z" />
-            )}
-          </svg>
-        </button> */}
       </div>
 
       <nav className="mt-7 flex flex-col gap-0.5">
@@ -164,13 +124,20 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
       <div className="glass-card mt-auto rounded-xl p-3">
         <div className="flex items-center gap-2 text-body font-medium">
           <span
-            className={`size-2 rounded-full ${running ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
+            className={`size-2 rounded-full ${
+              opening
+                ? 'bg-brand motion-safe:animate-pulse'
+                : running
+                  ? 'bg-status-online motion-safe:animate-breathe'
+                  : 'bg-status-offline'
+            }`}
           />
-          {running ? 'Gateway running' : 'Gateway paused'}
+          {opening ? 'Opening gateway' : running ? 'Gateway running' : 'Gateway paused'}
           <button
             onClick={() => void (running ? stopGateway() : startGateway())}
-            aria-label={running ? 'Pause gateway' : 'Start gateway'}
-            className={`ml-auto rounded-md p-1 ${running ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600' : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'}`}
+            disabled={opening}
+            aria-label={opening ? 'Opening gateway' : running ? 'Pause gateway' : 'Start gateway'}
+            className={`ml-auto rounded-md p-1 disabled:opacity-40 ${running ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600' : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'}`}
           >
             <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
               {running ? (

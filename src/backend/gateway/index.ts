@@ -9,6 +9,7 @@
  * 5. Logs all activity
  */
 
+import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { GatewayConfig, loadConfigFromEnv, mergeConfig, DEFAULT_GATEWAY_CONFIG } from '../shared/config.js'
@@ -18,7 +19,7 @@ import { MCPProxyServer } from './mcp/server.js'
 import { AuthManager, createAuthManager } from './auth/auth.js'
 import { PolicyEngine } from './authz/policy.js'
 import { getTailnetDevices, getTailscaleWhois } from './auth/tailscale.js'
-import { ServerConfigSchema, TransportType } from '../shared/protocol.js'
+import { ServerConfigSchema, TransportType, type ServerConfig } from '../shared/protocol.js'
 import { PolicyDocumentSchema } from '../shared/policy.js'
 import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
 import { normalizePeerUrl, peerHost } from '../shared/peer.js'
@@ -603,39 +604,44 @@ export class Gateway {
       }
 
       const host = peerHost(url)
-      const created = repos.servers.create({
+      // Handshake against an unsaved config. Persisting first made a failing peer
+      // show up in Connected peers for a poll or two, then disappear.
+      const now = Date.now()
+      const draft: ServerConfig = {
+        id: randomUUID(),
         name: `peer:${host}`,
         transport: TransportType.StreamableHttp,
         url,
         enabled: true,
         description: 'Remote Team MCP Gateway peer',
-      })
+        createdAt: now,
+        updatedAt: now,
+      }
 
       try {
-        await clientManager.connect(created)
-        repos.health.recordSuccess(created.id, 0)
+        await clientManager.connect(draft)
       } catch (error) {
-        await clientManager.disconnect(created.id).catch(() => undefined)
-        repos.servers.delete(created.id)
+        await clientManager.disconnect(draft.id).catch(() => undefined)
         sendJson(res, 502, {
           error: `Could not reach ${host}: ${error instanceof Error ? error.message : String(error)}`,
         })
         return
       }
 
-      const tools = (clientManager.getConnection(created.id)?.tools ?? []).map((t) => ({
+      const tools = (clientManager.getConnection(draft.id)?.tools ?? []).map((t) => ({
         name: t.name,
         description: t.description,
       }))
 
       // A probe validates reachability without keeping the peer registered.
       if (probe) {
-        await clientManager.disconnect(created.id)
-        repos.servers.delete(created.id)
+        await clientManager.disconnect(draft.id)
         sendJson(res, 200, { success: true, probe: true, url, tools })
         return
       }
 
+      const created = repos.servers.save(draft)
+      repos.health.recordSuccess(created.id, 0)
       sendJson(res, 201, { success: true, url, tools, server: created })
       return
     }

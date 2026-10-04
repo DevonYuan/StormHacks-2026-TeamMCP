@@ -84,6 +84,8 @@ export interface NetworkData {
   /** Denied (403) calls seen in the activity log. */
   authFailures: number
   status: GatewayStatus | null
+  /** True while the gateway process is starting. */
+  opening: boolean
   tailscale: TailscaleInfo
   updatedAt: number
   /** Force an immediate re-fetch instead of waiting for the next poll. */
@@ -143,6 +145,7 @@ async function loadSnapshot(): Promise<Snapshot> {
 export function NetworkDataProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT)
   const [error, setError] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -184,17 +187,35 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         snapshot.stats?.errorsByCode?.['403'] ??
         snapshot.activity.filter((e) => e.errorCode === 403).length,
       status: snapshot.status,
+      opening,
       tailscale: snapshot.tailscale,
       updatedAt: now,
       refresh: reload,
       startGateway: async () => {
-        await window.electronAPI?.gateway.start()
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to start the gateway')
+        setOpening(true)
+        try {
+          await api.gateway.start()
+          await reload()
+        } finally {
+          setOpening(false)
+        }
       },
       stopGateway: async () => {
         await window.electronAPI?.gateway.stop()
+        await reload()
       },
       expose: async () => {
-        await window.electronAPI?.gateway.expose()
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to expose the gateway')
+        setOpening(true)
+        try {
+          await api.gateway.expose()
+          await reload()
+        } finally {
+          setOpening(false)
+        }
       },
       getShare: async () => {
         const api = window.electronAPI
@@ -240,7 +261,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         return closed
       },
     }
-  }, [snapshot, error, reload])
+  }, [snapshot, error, opening, reload])
 
   return <NetworkDataContext.Provider value={data}>{children}</NetworkDataContext.Provider>
 }

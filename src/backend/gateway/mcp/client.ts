@@ -305,6 +305,13 @@ export class MCPClientManager extends EventEmitter {
       } catch (error) {
         logger.warn({ serverId, error }, 'Error closing MCP client')
       }
+    } else if (connection.transport) {
+      // connect() can fail before the client is assigned, leaving the transport open.
+      try {
+        await connection.transport.close()
+      } catch (error) {
+        logger.warn({ serverId, error }, 'Error closing MCP transport')
+      }
     }
 
     connection.status = 'disconnected'

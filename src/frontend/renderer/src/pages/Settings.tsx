@@ -15,6 +15,8 @@ import type { PolicyDocument, PolicyRule } from '@shared/policy'
 import type { ServerConfig } from '@shared/protocol'
 import type { Device } from '@shared/types'
 import { useNetworkData } from '../data/NetworkData'
+import { useTheme } from '../theme'
+import type { ThemePreference } from '../theme'
 
 interface Snapshot {
   policy: PolicyDocument | null
@@ -583,6 +585,39 @@ function Network({
   )
 }
 
+const THEMES: { id: ThemePreference; label: string; hint: string }[] = [
+  { id: 'light', label: 'Light', hint: 'Always use the light theme.' },
+  { id: 'dark', label: 'Dark', hint: 'Always use the dark theme.' },
+  { id: 'system', label: 'System', hint: 'Follow this device’s appearance setting.' }
+]
+
+function Appearance(): React.JSX.Element {
+  const { preference, setPreference } = useTheme()
+  const selected = THEMES.find((t) => t.id === preference) ?? THEMES[0]
+
+  return (
+    <Section title="Appearance" hint="Choose how Tether looks on this machine.">
+      <div className="flex w-fit rounded-lg border border-border p-0.5" role="radiogroup" aria-label="Color theme">
+        {THEMES.map((theme) => (
+          <button
+            key={theme.id}
+            type="button"
+            role="radio"
+            aria-checked={preference === theme.id}
+            onClick={() => setPreference(theme.id)}
+            className={`rounded-md px-3 py-1 text-body-small capitalize ${
+              preference === theme.id ? 'bg-brand text-primary-foreground' : 'text-ink hover:text-ink-emphasis'
+            }`}
+          >
+            {theme.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-caption text-ink">{selected.hint}</p>
+    </Section>
+  )
+}
+
 export default function Settings(): React.JSX.Element {
   const { available, devices } = useNetworkData()
   const [snap, setSnap] = useState<Snapshot>(EMPTY)
@@ -635,10 +670,12 @@ export default function Settings(): React.JSX.Element {
         </p>
       )}
 
-      {!available ? (
-        <p className="text-body text-ink">Open the desktop app to change settings.</p>
-      ) : (
-        <div className="space-y-6">
+      <div className="space-y-6">
+        <Appearance />
+        {!available ? (
+          <p className="text-body text-ink">Open the desktop app to change gateway settings.</p>
+        ) : (
+          <>
           {snap.policy ? (
             <Access policy={snap.policy} servers={snap.servers} devices={devices} busy={busy} act={act} />
           ) : (
@@ -649,8 +686,9 @@ export default function Settings(): React.JSX.Element {
           {snap.policy && <Servers servers={snap.servers} busy={busy} act={act} />}
           {snap.config && <Privacy config={snap.config} busy={busy} act={act} onNotice={setNotice} />}
           {snap.config && <Network key={snap.config.port} config={snap.config} busy={busy} act={act} />}
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
