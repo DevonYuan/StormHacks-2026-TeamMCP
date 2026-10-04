@@ -78,7 +78,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
     <aside className="row-span-2 flex flex-col border-r border-border bg-surface-sidebar px-3 py-5">
       <div className="flex items-center gap-2 px-2">
         <img src="./logo.png" alt="Tether" className="h-10 w-auto" />
-        <button
+        {/* <button
           onClick={toggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -102,7 +102,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
               <path d="M16.5 12.5A7 7 0 0 1 7.5 3.5a7 7 0 1 0 9 9z" />
             )}
           </svg>
-        </button>
+        </button> */}
       </div>
 
       <nav className="mt-7 flex flex-col gap-0.5">
