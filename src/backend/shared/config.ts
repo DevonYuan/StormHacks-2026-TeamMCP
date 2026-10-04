@@ -37,8 +37,8 @@ export const AppConfigSchema = z.object({
       minHeight: z.number().int().positive().default(600),
     })
     .default({}),
-  // Auto-start gateway on app launch
-  autoStartGateway: z.boolean().default(true),
+  // Start the gateway only when the user hosts or connects to a peer
+  autoStartGateway: z.boolean().default(false),
   // Check for updates
   checkUpdates: z.boolean().default(true),
 })

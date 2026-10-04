@@ -173,6 +173,9 @@ function createWindow(): void {
 }
 
 // Gateway process management
+/** In dev tsx transpiles the whole gateway graph on every start, ~17s observed. */
+const READY_TIMEOUT_MS = 30_000;
+
 function startGateway(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (gatewayProcess) {
@@ -192,22 +195,26 @@ function startGateway(): Promise<void> {
       ? ["--port", String(gatewayConfig.port), "--bind", gatewayConfig.bindAddr]
       : [];
 
-    gatewayProcess = spawn(
-      isDev ? "npx" : "node",
-      isDev ? ["tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
-      {
-        env: {
-          ...process.env,
-          GATEWAY_PORT: String(gatewayConfig.port),
-          GATEWAY_BIND_ADDR: gatewayConfig.bindAddr,
-          GATEWAY_DB_PATH: join(app.getPath("userData"), "gateway.db"),
-          LOG_LEVEL: gatewayConfig.logLevel,
-          REDACT_TOOL_PAYLOADS: String(gatewayConfig.redactToolPayloads),
-          NODE_ENV: isDev ? "development" : "production",
-        },
-        stdio: ["ignore", "pipe", "pipe", "ipc"],
+    // Run tsx's entry through node rather than the `npx tsx` wrapper: on Windows
+    // the installed binary is a .cmd shim that spawn cannot execute without a
+    // shell, and npx itself adds seconds of resolution before the gateway boots.
+    const nodeArgs = isDev
+      ? [require.resolve("tsx/cli"), gatewayEntry, ...args]
+      : [gatewayEntry, ...args];
+
+    gatewayProcess = spawn("node", nodeArgs, {
+      env: {
+        ...process.env,
+        GATEWAY_PORT: String(gatewayConfig.port),
+        GATEWAY_BIND_ADDR: gatewayConfig.bindAddr,
+        GATEWAY_DB_PATH: join(app.getPath("userData"), "gateway.db"),
+        LOG_LEVEL: gatewayConfig.logLevel,
+        REDACT_TOOL_PAYLOADS: String(gatewayConfig.redactToolPayloads),
+        NODE_ENV: isDev ? "development" : "production",
       },
-    );
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      windowsHide: true,
+    });
 
     gatewayProcess.stdout?.on("data", (data) => {
       const lines = data.toString().trim().split("\n");
@@ -295,13 +302,19 @@ function startGateway(): Promise<void> {
       }
     }, 500);
 
-    // Timeout after 10 seconds
     setTimeout(() => {
       clearInterval(checkReady);
-      if (!isGatewayRunning) {
-        reject(new Error("Gateway failed to start within 10 seconds"));
-      }
-    }, 10000);
+      if (isGatewayRunning) return;
+      // Kill the child too: leaving it alive but unreported means the next
+      // start call short-circuits on "already running" and never resolves.
+      gatewayProcess?.kill();
+      gatewayProcess = null;
+      reject(
+        new Error(
+          `Gateway failed to start within ${READY_TIMEOUT_MS / 1000} seconds`,
+        ),
+      );
+    }, READY_TIMEOUT_MS);
   });
 }
 
@@ -363,6 +376,42 @@ async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+const EMPTY_ACTIVITY_STATS: ActivityStats = {
+  totalRequests: 0,
+  successfulRequests: 0,
+  failedRequests: 0,
+  uniqueUsers: 0,
+  uniqueServers: 0,
+  avgDurationMs: 0,
+  byMethod: {},
+  byServer: {},
+  byTool: {},
+  byIdentity: {},
+  errorsByCode: {},
+};
+
+/**
+ * Read gateway state, or `fallback` while the gateway is stopped. A user who is
+ * neither hosting nor connected to a peer has no gateway, so these reads must
+ * not reach the network or reject — both only produce noise in that state.
+ */
+async function gatewayRead<T>(path: string, fallback: T): Promise<T> {
+  if (!isGatewayRunning) return fallback;
+  try {
+    return await gatewayFetch<T>(path);
+  } catch (error) {
+    logger.debug({ error, path }, "Gateway read failed");
+    return fallback;
+  }
+}
+
+/** Mutations are explicit user actions, so they fail loudly but legibly. */
+function requireGateway(): void {
+  if (!isGatewayRunning) {
+    throw new Error("Gateway is not running. Open a connection first.");
+  }
 }
 
 // CPU % is the busy share of all core time since the previous call.
@@ -461,7 +510,7 @@ function setupIpcHandlers(): void {
 
   // Server management (proxied to the gateway control API)
   ipcMain.handle(IPC_CHANNELS.SERVERS_GET, async () => {
-    return gatewayFetch<ServerConfig[]>("/api/servers");
+    return gatewayRead<ServerConfig[]>("/api/servers", []);
   });
 
   ipcMain.handle(
@@ -470,6 +519,7 @@ function setupIpcHandlers(): void {
       _event,
       server: Omit<ServerConfig, "id" | "createdAt" | "updatedAt">,
     ) => {
+      requireGateway();
       const created = await gatewayFetch<ServerConfig>("/api/servers", {
         method: "POST",
         body: JSON.stringify(server),
@@ -481,6 +531,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SERVERS_UPDATE,
     async (_event, id: string, updates: Partial<ServerConfig>) => {
+      requireGateway();
       const updated = await gatewayFetch<ServerConfig>(`/api/servers/${id}`, {
         method: "PUT",
         body: JSON.stringify(updates),
@@ -490,12 +541,14 @@ function setupIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.SERVERS_DELETE, async (_event, id: string) => {
+    requireGateway();
     return gatewayFetch<{ success: boolean }>(`/api/servers/${id}`, {
       method: "DELETE",
     });
   });
 
   ipcMain.handle(IPC_CHANNELS.SERVERS_CONNECT, async (_event, id: string) => {
+    requireGateway();
     return gatewayFetch<{ success: boolean }>(`/api/servers/${id}/connect`, {
       method: "POST",
     });
@@ -504,6 +557,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.SERVERS_DISCONNECT,
     async (_event, id: string) => {
+      requireGateway();
       return gatewayFetch<{ success: boolean }>(
         `/api/servers/${id}/disconnect`,
         { method: "POST" },
@@ -512,6 +566,7 @@ function setupIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.SERVERS_REFRESH, async (_event, id: string) => {
+    requireGateway();
     return gatewayFetch<{ success: boolean }>(`/api/servers/${id}/refresh`, {
       method: "POST",
     });
@@ -519,12 +574,19 @@ function setupIpcHandlers(): void {
 
   // Policy management
   ipcMain.handle(IPC_CHANNELS.POLICY_GET, async () => {
-    return gatewayFetch<PolicyDocument>("/api/policy");
+    return gatewayRead<PolicyDocument>("/api/policy", {
+      version: 1,
+      defaultEffect: "deny",
+      rules: [],
+      updatedAt: 0,
+      updatedBy: "system",
+    });
   });
 
   ipcMain.handle(
     IPC_CHANNELS.POLICY_UPDATE,
     async (_event, policy: PolicyDocument) => {
+      requireGateway();
       return gatewayFetch<{ success: boolean; policy: PolicyDocument }>(
         "/api/policy",
         {
@@ -538,6 +600,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.POLICY_ADD_RULE,
     async (_event, rule: PolicyRule) => {
+      requireGateway();
       const policy = await gatewayFetch<PolicyDocument>("/api/policy");
       const updated: PolicyDocument = {
         ...policy,
@@ -556,6 +619,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.POLICY_REMOVE_RULE,
     async (_event, ruleId: string) => {
+      requireGateway();
       const policy = await gatewayFetch<PolicyDocument>("/api/policy");
       const updated: PolicyDocument = {
         ...policy,
@@ -581,19 +645,24 @@ function setupIpcHandlers(): void {
           params.set(key, String(value));
         }
       }
-      return gatewayFetch<ActivityEntry[]>(
+      return gatewayRead<ActivityEntry[]>(
         `/api/activity?${params.toString()}`,
+        [],
       );
     },
   );
 
   ipcMain.handle(IPC_CHANNELS.ACTIVITY_STATS, async () => {
-    return gatewayFetch<ActivityStats>("/api/activity/stats");
+    return gatewayRead<ActivityStats>(
+      "/api/activity/stats",
+      EMPTY_ACTIVITY_STATS,
+    );
   });
 
   ipcMain.handle(
     IPC_CHANNELS.ACTIVITY_PRUNE,
     async (_event, olderThanMs: number) => {
+      requireGateway();
       return gatewayFetch<{ success: boolean; count: number }>(
         "/api/activity/prune",
         {
@@ -606,7 +675,7 @@ function setupIpcHandlers(): void {
 
   // Health
   ipcMain.handle(IPC_CHANNELS.HEALTH_GET, async () => {
-    return gatewayFetch<ServerHealth[]>("/api/health");
+    return gatewayRead<ServerHealth[]>("/api/health", []);
   });
 
   // Config
@@ -635,29 +704,35 @@ function setupIpcHandlers(): void {
 
   // Tailscale
   ipcMain.handle(IPC_CHANNELS.TAILSCALE_STATUS, async () => {
-    if (!isGatewayRunning) {
-      return { available: false, ip: null, hostname: null, dnsName: null };
-    }
-    return gatewayFetch<{
+    return gatewayRead<{
       available: boolean;
       ip: string | null;
       hostname: string | null;
       dnsName: string | null;
-    }>("/api/tailscale");
+    }>("/api/tailscale", {
+      available: false,
+      ip: null,
+      hostname: null,
+      dnsName: null,
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.TAILSCALE_WHOIS, async (_event, ip: string) => {
+    requireGateway();
     return gatewayFetch(`/api/tailscale/whois?ip=${encodeURIComponent(ip)}`);
   });
 
   // Share + peers
   ipcMain.handle(IPC_CHANNELS.SHARE_GET, async () => {
+    requireGateway();
     return gatewayFetch<ShareInfo>("/api/share");
   });
 
   ipcMain.handle(
     IPC_CHANNELS.PEERS_ADD,
     async (_event, address: string, probe?: boolean) => {
+      // Connecting to a peer is one of the two reasons to have a gateway at all.
+      if (!isGatewayRunning) await startGateway();
       return gatewayFetch<AddPeerResult>("/api/peers", {
         method: "POST",
         body: JSON.stringify({ address, probe: probe === true }),
@@ -666,6 +741,7 @@ function setupIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.PEERS_REMOVE, async (_event, id: string) => {
+    requireGateway();
     return gatewayFetch<{ success: boolean }>(`/api/peers/${id}`, {
       method: "DELETE",
     });

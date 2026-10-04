@@ -96,8 +96,17 @@ async function settle<T>(task: Promise<T>): Promise<T | null> {
 
 async function loadGateway(): Promise<GatewaySnapshot> {
   const api = bridge()
-  const [status, tailscale, entries, stats] = await Promise.all([
-    settle(api ? api.gateway.getStatus() : fetchJson<GatewayStatus>('/api/status')),
+  const status = await settle(
+    api ? api.gateway.getStatus() : fetchJson<GatewayStatus>('/api/status')
+  )
+
+  // A stopped gateway means no hosting and no peers, so there are no machines to
+  // list and nothing worth requesting.
+  if (!status?.running) {
+    return { status, tailscale: null, entries: [], stats: null, error: null }
+  }
+
+  const [tailscale, entries, stats] = await Promise.all([
     settle(api ? api.tailscale.getStatus() : fetchJson<TailscaleInfo>('/api/tailscale')),
     settle(
       api
@@ -107,16 +116,7 @@ async function loadGateway(): Promise<GatewaySnapshot> {
     settle(api ? api.activity.getStats() : fetchJson<ActivityStats>('/api/activity/stats'))
   ])
 
-  return {
-    status,
-    tailscale,
-    entries: entries ?? [],
-    stats,
-    error:
-      status || tailscale || entries || stats
-        ? null
-        : `Can't reach the gateway at ${GATEWAY_ORIGIN}`
-  }
+  return { status, tailscale, entries: entries ?? [], stats, error: null }
 }
 
 function peerStatus(entry: ActivityEntry): MachineStatus {
@@ -143,7 +143,7 @@ function generateGatewayId(status: GatewayStatus): string {
 
 function buildMachines(gateway: GatewaySnapshot): Machine[] {
   const machines: Machine[] = []
-  if (gateway.status) {
+  if (gateway.status?.running) {
     const host = gateway.tailscale
     machines.push({
       id: 'local-gateway',
@@ -523,7 +523,11 @@ export default function Machines(): React.JSX.Element {
             ) : pageRows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-6 py-10 text-body text-ink">
-                  {loading ? 'Loading machines…' : 'No machines match this view.'}
+                  {loading
+                    ? 'Loading machines…'
+                    : gateway && !gateway.status?.running
+                      ? 'Gateway is not running. Open a connection to host your servers or join a peer.'
+                      : 'No machines match this view.'}
                 </td>
               </tr>
             ) : (

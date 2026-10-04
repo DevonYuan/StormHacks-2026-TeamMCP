@@ -99,8 +99,12 @@ async function loadSnapshot(): Promise<Snapshot> {
   const api = window.electronAPI
   if (!api) return EMPTY_SNAPSHOT
 
-  const [status, servers, health, activity, policy, stats, tailscale] = await Promise.all([
-    settle(api.gateway.getStatus()),
+  const status = await settle(api.gateway.getStatus())
+  // Without a gateway the user is neither hosting nor connected to a peer, so
+  // there is nothing to read. Stop here rather than poll a process that is down.
+  if (!status?.running) return { ...EMPTY_SNAPSHOT, status }
+
+  const [servers, health, activity, policy, stats, tailscale] = await Promise.all([
     settle(api.servers.getAll()),
     settle(api.health.getAll()),
     settle(api.activity.query({ limit: 200 })),
