@@ -28,7 +28,11 @@
     "inspector": "npx @modelcontextprotocol/inspector",
     "db:migrate": "tsx src/backend/gateway/db/migrate.ts",
     "db:reset": "rm -f gateway.db && npm run db:migrate",
-    "package": "electron-builder",
+    "package": "node scripts/package.mjs",
+    "package:mac": "node scripts/package.mjs --mac",
+    "package:win": "node scripts/package.mjs --win",
+    "package:linux": "node scripts/package.mjs --linux",
+    "package:dir": "node scripts/package.mjs --dir",
     "check:types": "npm run typecheck",
     "kill": "pkill -f 'electron-vite|tsx.*gateway' || true"
   },
@@ -37,7 +41,6 @@
     "@trpc/client": "^11.0.0",
     "@trpc/server": "^11.0.0",
     "concurrently": "^9.0.0",
-    "electron": "^30.0.0",
     "electron-log": "^5.1.0",
     "electron-updater": "^6.3.0",
     "pino": "^9.0.0",
@@ -58,6 +61,7 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "electron-builder": "^25.0.0",
+    "electron": "^30.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.35.0",
@@ -87,6 +91,9 @@
       "dist/frontend/**",
       "!**/*.map"
     ],
+    "asarUnpack": [
+      "dist/backend/gateway/**"
+    ],
     "extraResources": [
       {
         "from": "src/backend/gateway/db/schema.sql",
@@ -106,20 +113,20 @@
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns"
+      "icon": "docs/logo.png"
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.ico"
+      "icon": "docs/logo.png"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "icon": "build/icon.png"
+      "icon": "docs/logo.png"
     },
     "nsis": {
       "oneClick": false,

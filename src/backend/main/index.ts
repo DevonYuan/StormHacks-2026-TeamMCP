@@ -12,9 +12,9 @@
 
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFile, spawn, ChildProcess } from "node:child_process";
-import { cpus, freemem, loadavg, totalmem } from "node:os";
+import { cpus, freemem, homedir, loadavg, totalmem } from "node:os";
 import {
   GatewayConfig,
   GatewayConfigSchema,
@@ -145,6 +145,50 @@ function startGateway(): Promise<void> {
   return gatewayStartPromise;
 }
 
+// Packaged GUI apps get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
+// excludes Homebrew, nvm and other user-managed locations, so a bare
+// `spawn("node", …)` fails with ENOENT and the gateway never starts. Probe the
+// usual install spots (mirroring TAILSCALE_CLI_CANDIDATES) and fall back to a
+// PATH lookup for terminal launches on Linux.
+const NODE_BINARY_CANDIDATES = [
+  process.env["TEAM_MCP_NODE"],
+  "/opt/homebrew/bin/node", // Homebrew (Apple Silicon)
+  "/usr/local/bin/node", // Homebrew (Intel) / manual install
+  "/usr/bin/node", // distro package (Linux)
+  "C:\\Program Files\\nodejs\\node.exe",
+  "C:\\Program Files (x86)\\nodejs\\node.exe",
+].filter((candidate): candidate is string => Boolean(candidate));
+
+/** Highest Node version installed under nvm, if any (nvm keeps them off PATH for GUI apps). */
+function findNvmNode(): string | null {
+  try {
+    const root = join(homedir(), ".nvm", "versions", "node");
+    const compare = (a: string, b: string): number => {
+      const [aMajor = 0, aMinor = 0, aPatch = 0] = a.slice(1).split(".").map(Number);
+      const [bMajor = 0, bMinor = 0, bPatch = 0] = b.slice(1).split(".").map(Number);
+      return bMajor - aMajor || bMinor - aMinor || bPatch - aPatch;
+    };
+    const versions = readdirSync(root)
+      .filter((name) => name.startsWith("v"))
+      .sort(compare);
+    for (const version of versions) {
+      const binary = join(root, version, "bin", "node");
+      if (existsSync(binary)) return binary;
+    }
+  } catch {
+    // No nvm install — fall through.
+  }
+  return null;
+}
+
+/** Absolute path to a usable Node (≥22.5 for node:sqlite), or "node" from PATH. */
+function resolveNodeBinary(): string {
+  for (const candidate of NODE_BINARY_CANDIDATES) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return findNvmNode() ?? "node";
+}
+
 /** Spawn the standalone gateway and resolve after its HTTP API is ready. */
 function startGatewayProcess(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -161,10 +205,14 @@ function startGatewayProcess(): Promise<void> {
 
     logger.info("Starting gateway process...");
 
-    // Determine gateway entry point
+    // Determine gateway entry point. The gateway runs under the SYSTEM node (it
+    // needs node:sqlite ≥22.5), and non-Electron Node cannot read files inside
+    // app.asar — so electron-builder unpacks dist/backend/gateway/** (see
+    // build.asarUnpack) and we rewrite the asar path to its unpacked location.
+    // The replace is a no-op when asar is disabled.
     const gatewayEntry = isDev
       ? join(__dirname, "../../../src/backend/gateway/index.ts") // tsx will handle this
-      : join(__dirname, "../gateway/index.js");
+      : join(__dirname, "../gateway/index.js").replace("app.asar", "app.asar.unpacked");
 
     const args = isDev
       ? ["--port", String(gatewayConfig.port), "--bind", gatewayConfig.bindAddr]
@@ -174,7 +222,7 @@ function startGatewayProcess(): Promise<void> {
     // `node --import tsx` directly — not `npx tsx` — keeps gatewayProcess as the real
     // process so SIGTERM kills it cleanly; an npx wrapper leaks the child (and the port).
     const child = spawn(
-      "node",
+      resolveNodeBinary(),
       isDev ? ["--import", "tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
       {
         env: {

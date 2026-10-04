@@ -339,6 +339,26 @@ If the gateway graduates from a hackathon demo into something teammates download
 
 So: **yes, a completely free Windows `.exe` installer is achievable** — and **no**, building on a different OS does not make the macOS download free.
 
+#### One command, the right installer for the host OS
+
+`npm run package` runs the build, then **auto-detects the OS** and produces that platform's installer (`scripts/package.mjs`). A teammate on Linux runs the exact same command and gets the Linux installers:
+
+| Host OS | `npm run package` produces |
+| --- | --- |
+| macOS | `dist/*.dmg`, `dist/*-mac.zip` |
+| Linux | `dist/*.AppImage`, `dist/*.deb` |
+| Windows | `dist/*-Setup-*.exe` (NSIS) |
+
+Force a target with `--mac` / `--win` / `--linux`, produce just the unpacked app with `--dir`, or reuse the existing build with `--skip-build`:
+
+```bash
+npm run package             # installer for the current OS
+npm run package:linux       # = node scripts/package.mjs --linux
+npm run package -- --dir    # unpacked app directory only (no installer)
+```
+
+Build each OS's installer **on that same OS** — electron-builder's cross-compilation is unreliable (Windows needs Wine, macOS `dmg` needs macOS).
+
 #### A free Windows `.exe` installer
 
 electron-builder's NSIS target produces a standard `.exe` installer. No certificate, no account, no cost — just ship unsigned and accept the one-click SmartScreen prompt:
@@ -348,7 +368,7 @@ electron-builder's NSIS target produces a standard `.exe` installer. No certific
 {
   "win": {
     "target": ["nsis"],
-    "icon": "build/icon.ico"
+    "icon": "docs/logo.png"
   },
   "nsis": {
     "oneClick": false,
@@ -534,7 +554,11 @@ npx playwright install --with-deps  # Linux
 | `npm run test:integration` | Vitest — integration tests only, against the local fixture MCP server |
 | `npm run test:e2e` | Playwright Electron specs |
 | `npm run inspector` | Launches MCP Inspector against the running gateway |
-| `npm run package` | electron-builder installers for the current platform |
+| `npm run package` | Build + package an installer for the **current OS** (macOS → dmg+zip, Linux → AppImage+deb, Windows → nsis) |
+| `npm run package:mac` | Force a macOS installer (`--mac`) — build on macOS |
+| `npm run package:linux` | Force a Linux installer (`--linux`) — build on Linux |
+| `npm run package:win` | Force a Windows installer (`--win`) — build on Windows/CI |
+| `npm run package:dir` | Unpacked app directory only, no installer (`--dir`) |
 
 #### Development helper scripts (smoother DX)
 | Script | What it does |
