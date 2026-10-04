@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import Home from './pages/Home'
 import Machines from './pages/Machines'
+import Settings from './pages/Settings'
 import { useNetworkData } from './data/NetworkData'
 import { ConnectModal } from './components/ConnectModal'
 import { ExposeModal } from './components/ExposeModal'
@@ -274,7 +275,7 @@ function App(): React.JSX.Element {
           ) : page === 'Machines' ? (
             <Machines />
           ) : (
-            <p className="text-ink">{page} is coming next.</p>
+            <Settings />
           )}
         </div>
       </main>
