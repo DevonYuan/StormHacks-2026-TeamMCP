@@ -12,7 +12,7 @@
     "gateway:dev": "tsx watch src/backend/gateway/index.ts",
     "gateway:logs": "tail -f logs/gateway.log 2>/dev/null || echo 'No gateway logs yet'",
     "build": "npm run typecheck && electron-vite build -c config/electron.vite.config.ts && npm run build:gateway",
-    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/backend/gateway/db && cp src/backend/gateway/db/schema.sql dist/backend/gateway/db/schema.sql",
+    "build:gateway": "vite build --config config/vite.gateway.config.ts && mkdir -p dist/backend/gateway/db/migrations && cp src/backend/gateway/db/schema.sql dist/backend/gateway/db/schema.sql && cp src/backend/gateway/db/migrations/002_gateway_accounts.sql dist/backend/gateway/db/migrations/002_gateway_accounts.sql && cp src/backend/gateway/db/migrations/003_gateway_approvals.sql dist/backend/gateway/db/migrations/003_gateway_approvals.sql",
     "rebuild": "@electron/rebuild",
     "start": "electron-vite preview -c config/electron.vite.config.ts",
     "typecheck": "tsc --noEmit -p config/tsconfig.main.json && tsc --noEmit -p config/tsconfig.preload.json && tsc --noEmit -p config/tsconfig.gateway.json && tsc --noEmit -p config/tsconfig.renderer.json",
@@ -28,7 +28,11 @@
     "inspector": "npx @modelcontextprotocol/inspector",
     "db:migrate": "tsx src/backend/gateway/db/migrate.ts",
     "db:reset": "rm -f gateway.db && npm run db:migrate",
-    "package": "electron-builder",
+    "package": "node scripts/package.mjs",
+    "package:mac": "node scripts/package.mjs --mac",
+    "package:win": "node scripts/package.mjs --win",
+    "package:linux": "node scripts/package.mjs --linux",
+    "package:dir": "node scripts/package.mjs --dir",
     "check:types": "npm run typecheck",
     "kill": "pkill -f 'electron-vite|tsx.*gateway' || true"
   },
@@ -38,7 +42,6 @@
     "@trpc/client": "^11.0.0",
     "@trpc/server": "^11.0.0",
     "concurrently": "^9.0.0",
-    "electron": "^30.0.0",
     "electron-log": "^5.1.0",
     "electron-updater": "^6.3.0",
     "pino": "^9.0.0",
@@ -59,6 +62,7 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "electron-builder": "^25.0.0",
+    "electron": "^30.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.0.0",
     "eslint-plugin-react": "^7.35.0",
@@ -88,10 +92,21 @@
       "dist/frontend/**",
       "!**/*.map"
     ],
+    "asarUnpack": [
+      "dist/backend/gateway/**"
+    ],
     "extraResources": [
       {
         "from": "src/backend/gateway/db/schema.sql",
         "to": "gateway/db/schema.sql"
+      },
+      {
+        "from": "src/backend/gateway/db/migrations/002_gateway_accounts.sql",
+        "to": "gateway/db/migrations/002_gateway_accounts.sql"
+      },
+      {
+        "from": "src/backend/gateway/db/migrations/003_gateway_approvals.sql",
+        "to": "gateway/db/migrations/003_gateway_approvals.sql"
       }
     ],
     "mac": {
@@ -99,20 +114,40 @@
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns"
+      "icon": "docs/icon.png"
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.ico"
+      "icon": "docs/icon.png"
     },
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "pacman"
       ],
-      "icon": "build/icon.png"
+      "icon": "docs/icon.png",
+      "category": "Development",
+      "maintainer": "Team MCP <mahesh.jograna10@gmail.com>"
+    },
+    "pacman": {
+      "depends": [
+        "c-ares",
+        "ffmpeg",
+        "gtk3",
+        "http-parser",
+        "libevent",
+        "libvpx",
+        "libxslt",
+        "libxss",
+        "minizip",
+        "nss",
+        "re2",
+        "snappy",
+        "libnotify"
+      ]
     },
     "nsis": {
       "oneClick": false,

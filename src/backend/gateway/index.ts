@@ -4,7 +4,7 @@
  * This is the data plane process that:
  * 1. Manages connections to local MCP servers (stdio/HTTP)
  * 2. Exposes a unified MCP endpoint via Streamable HTTP
- * 3. Handles authentication (Tailscale identity + Ed25519 tokens)
+ * 3. Enforces host-local approvals for verified Tailscale identities
  * 4. Enforces authorization policies
  * 5. Logs all activity
  */
@@ -16,6 +16,7 @@ import { createDatabase, runMigrations, createRepositories, Repositories } from 
 import { MCPClientManager } from './mcp/client.js'
 import { MCPProxyServer } from './mcp/server.js'
 import { AuthManager, createAuthManager } from './auth/auth.js'
+import { GatewayApprovalService } from './auth/approvals.js'
 import { PolicyEngine } from './authz/policy.js'
 import type { PolicyDocument, PolicyRule } from '../shared/policy.js'
 import { GatewayHttpRouter } from './http/routes.js'
@@ -62,10 +63,13 @@ export class Gateway {
     const db = createDatabase(config)
     runMigrations(db)
     const repos = createRepositories(db)
+    const approvalService = new GatewayApprovalService(repos.approvals)
 
-    // Initialize auth manager (signing key will be loaded from Electron main via IPC in production)
+    // Initialize Tailscale identity resolution and legacy token support.
     const authManager = createAuthManager(config, repos.revokedTokens)
-    await authManager.initialize() // In production, pass private key from safeStorage
+    await authManager.initialize()
+    const localIdentity = await authManager.resolveClientIdentity('127.0.0.1')
+    if (localIdentity) approvalService.trustLocalHost(localIdentity)
 
     // Initialize policy engine
     const policyDoc = repos.policy.get()
@@ -142,6 +146,7 @@ export class Gateway {
       clientManager,
       policyEngine,
       authManager,
+      approvalService,
       activityRepo: repos.activity,
       healthRepo: repos.health,
     })
@@ -152,6 +157,7 @@ export class Gateway {
     const httpContext = {
       proxyServer,
       authManager,
+      approvalService,
       policyEngine,
       repos,
       clientManager,
@@ -196,17 +202,33 @@ export class Gateway {
 
     logger.info('Shutting down gateway...')
 
-    if (this.services) {
-      await this.services.clientManager.disconnectAll()
-      await this.services.proxyServer.shutdown()
-      this.services.db.close()
+    // Never let a hung cleanup keep the process (and its listening port) alive —
+    // an orphaned gateway would block the next start with EADDRINUSE.
+    const bail = setTimeout(() => {
+      logger.warn('Gateway shutdown timed out — forcing exit')
+      process.exit(0)
+    }, 3000)
+    bail.unref()
+
+    try {
+      if (this.services) {
+        await this.services.clientManager.disconnectAll()
+        await this.services.proxyServer.shutdown()
+        this.services.db.close()
+      }
+
+      for (const server of [this.httpServer, this.loopbackServer]) {
+        if (!server) continue
+        // Force-close lingering (keep-alive / idle) connections so close() resolves.
+        server.closeIdleConnections()
+        server.closeAllConnections()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      }
+    } catch (error) {
+      logger.error({ error }, 'Error during shutdown')
     }
 
-    for (const server of [this.httpServer, this.loopbackServer]) {
-      if (!server) continue
-      await new Promise<void>((resolve) => server.close(() => resolve()))
-    }
-
+    clearTimeout(bail)
     logger.info('Gateway stopped')
     process.exit(0)
   }

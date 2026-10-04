@@ -4,7 +4,7 @@
  */
 
 import { readFileSync, existsSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { openDatabase, type SqliteDatabase } from './sqlite.js'
 import { GatewayConfig } from '../../shared/config.js'
 
@@ -35,11 +35,22 @@ export interface Migration {
 }
 
 function loadMigrations(): Migration[] {
+  const schemaPath = resolveSchemaPath()
   return [
     {
       version: 1,
       name: 'initial_schema',
-      up: readFileSync(resolveSchemaPath(), 'utf-8'),
+      up: readFileSync(schemaPath, 'utf-8'),
+    },
+    {
+      version: 2,
+      name: 'gateway_accounts',
+      up: readFileSync(join(dirname(schemaPath), 'migrations', '002_gateway_accounts.sql'), 'utf-8'),
+    },
+    {
+      version: 3,
+      name: 'gateway_approvals',
+      up: readFileSync(join(dirname(schemaPath), 'migrations', '003_gateway_approvals.sql'), 'utf-8'),
     },
   ]
 }

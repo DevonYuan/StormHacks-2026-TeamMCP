@@ -17,6 +17,7 @@ import type {
   GatewayStatus,
   GatewayConfig,
 } from '../../backend/shared/index.js'
+import type { GatewayApproval } from '../../backend/shared/account.js'
 import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from '../../backend/shared/types.js'
 import { IPC_CHANNELS, type IpcChannel } from '../../backend/shared/ipc.js'
 
@@ -111,6 +112,12 @@ const api = {
   sessions: {
     disconnect: (deviceId: string) =>
       invoke<[string], { success: boolean; closed: number }>('sessions:disconnect', deviceId),
+  },
+
+  approvals: {
+    list: () => invoke<[], GatewayApproval[]>('approvals:list'),
+    approve: (id: string) => invoke<[string], GatewayApproval>('approvals:approve', id),
+    revoke: (id: string) => invoke<[string], GatewayApproval>('approvals:revoke', id),
   },
 
   // Health monitoring

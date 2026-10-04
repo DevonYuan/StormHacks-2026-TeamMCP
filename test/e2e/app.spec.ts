@@ -32,25 +32,41 @@ test.describe('Team MCP Gateway App', () => {
   })
 
   test('should switch between client and server modes', async ({ page }) => {
-    await page.getByRole('button', { name: 'client', exact: true }).click()
+    await page.getByRole('button', { name: /client/i }).first().click()
     await expect(page.getByText('Client mode')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Connect to a host' })).toBeVisible()
     await page.getByRole('button', { name: 'server', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Connect to a peer' })).toBeVisible()
   })
 
-  test('should create a demo account and return to the login screen on logout', async ({ page }) => {
+  test('should create a local profile and return to the login screen on logout', async ({ page }) => {
     await page.getByRole('button', { name: 'Log out' }).click()
     await page.getByRole('tab', { name: 'Sign up' }).click()
     await page.getByLabel('Name').fill('Example Tester')
     await page.getByLabel('Email').fill('example@test.local')
     await page.getByRole('textbox', { name: 'Password', exact: true }).fill('example123')
     await page.getByLabel('Confirm password').fill('example123')
-    await page.locator('form').getByRole('button', { name: 'Create account' }).click()
+    await page.locator('form').getByRole('button', { name: 'Create profile' }).click()
 
     await expect(page.getByText('Example Tester')).toBeVisible()
     await page.getByRole('button', { name: 'Log out' }).click()
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+  })
+
+  test('client profile signup does not ask for any host or IP address', async ({ page }) => {
+    await page.getByRole('button', { name: 'Log out' }).click()
+    await page.getByRole('tab', { name: 'Sign up' }).click()
+    await page.getByRole('button', { name: /client/i }).first().click()
+
+    await expect(page.getByLabel('Host gateway address')).toHaveCount(0)
+    await page.getByLabel('Name').fill('Client Tester')
+    await page.getByLabel('Email').fill('client@test.local')
+    await page.getByRole('textbox', { name: 'Password', exact: true }).fill('clientpass1')
+    await page.getByLabel('Confirm password').fill('clientpass1')
+    await page.locator('form').getByRole('button', { name: 'Create profile' }).click()
+
+    await expect(page.getByText('Client Tester')).toBeVisible()
+    await expect(page.getByText('Client mode')).toBeVisible()
   })
 
   test('should skip authentication for development', async ({ page }) => {

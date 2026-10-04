@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 export const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Tether-Account-Id',
 }
 
 /** Write a JSON response with the gateway's shared CORS and content headers. */

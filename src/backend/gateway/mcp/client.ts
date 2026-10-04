@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'node:events'
+import path from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -127,6 +128,34 @@ export class MCPClientManager extends EventEmitter {
     }
   }
 
+  /**
+   * Build the child env for spawned stdio servers. GUI-launched apps get a
+   * minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that excludes Homebrew/nvm, so
+   * commands like `npx` are not found ("spawn npx ENOENT"). Prepend the running
+   * Node's own bin dir and the usual install locations so those commands resolve.
+   */
+  private spawnEnv(): Record<string, string> {
+    const env = { ...(process.env as Record<string, string>) }
+    const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH'
+    const extra = [
+      path.dirname(process.execPath),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      'C:\\Program Files\\nodejs',
+    ]
+    const parts = [...extra, ...(env[key] ? env[key].split(path.delimiter) : [])]
+    const seen = new Set<string>()
+    const merged: string[] = []
+    for (const part of parts) {
+      if (part && !seen.has(part)) {
+        seen.add(part)
+        merged.push(part)
+      }
+    }
+    env[key] = merged.join(path.delimiter)
+    return env
+  }
+
   private createTransport(config: ServerConfig): MCPTransport {
     switch (config.transport) {
       case TransportType.Stdio: {
@@ -136,7 +165,7 @@ export class MCPClientManager extends EventEmitter {
         return new StdioClientTransport({
           command: config.command,
           args: config.args || [],
-          env: { ...(process.env as Record<string, string>), ...(config.env || {}) },
+          env: { ...this.spawnEnv(), ...(config.env || {}) },
           cwd: config.cwd,
           stderr: 'inherit',
         })

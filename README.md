@@ -71,7 +71,7 @@ If one developer already has several useful MCP servers configured locally, the 
 
 ### No redeployment, no cloud bill
 
-An MCP server that works locally does not need to be packaged, containerized, given CI/CD, and redeployed to AWS, Azure, or GCP just so a teammate can call a tool. There is no hosted backend to operate, no account database to run, and no MCP hosting platform to pay for. **The project itself does not need to run any infrastructure.**
+An MCP server that works locally does not need to be packaged, containerized, given CI/CD, and redeployed to AWS, Azure, or GCP just so a teammate can call a tool. There is no hosted backend or centralized account database to operate, and no MCP hosting platform to pay for. **The project itself does not need to run any infrastructure.**
 
 ### Resources stay where the data lives
 
@@ -128,14 +128,14 @@ This is **not** the right choice when you need 24/7 availability, elastic scale,
 | Local transports | **stdio** + **Streamable HTTP** | stdio for spawned local servers; Streamable HTTP for already-running local/remote servers, with SSE fallback for older ones. |
 | Exposed transport | **Streamable HTTP** (MCP-canonical) | The gateway serves one modern endpoint to remote clients, with SSE backward-compatibility where needed. |
 | Networking | **Tailscale** primary, **LAN** for local demo | Tailscale gives NAT traversal, WireGuard encryption, and device identity with zero infrastructure. We consume it — we do not rebuild it. Hostname/address discovered via `tailscale status --json`. |
-| AuthN | **Tailscale identity (WhoIs)** + **Ed25519-signed session tokens** | `tailscale whois` maps a connection to a device/user identity; short-lived signed tokens scope that identity to a session. Secrets stored via Electron **`safeStorage`** (OS keychain). |
+| AuthN / access | **Verified Tailscale identity + per-gateway approval** | The host resolves each incoming connection to a Tailscale user. Each gateway separately approves that user; all of their devices on that tailnet share the decision. |
 | AuthZ | **Policy file (declarative) → RBAC** | Identity → allowed servers → allowed tools, stored locally and hot-reloadable. |
-| Persistence | **SQLite (`node:sqlite`)** | The gateway stores its server registry, policy, health, activity, and revoked-token data locally. The demo signup/login UI does not persist accounts. |
+| Persistence | **SQLite (`node:sqlite`)** | Each gateway stores its server registry, policy, health, activity, revoked-token data, and local Tailscale approval decisions. |
 | Validation / config | **Zod** | Validate policy files, config, and untrusted protocol payloads at the boundary. |
 | Logging | **pino** + SQLite activity store | Structured logs for debugging; a queryable activity log streamed live to the UI. |
 | Testing | **Vitest** (unit) + **Playwright** (Electron E2E) | Fast unit tests for routing/policy; real end-to-end runs through the actual Electron app. |
 
-The current login/signup screen is a **local UI demo only**: accounts and login events are held in memory and disappear when the app reloads. Development builds also include a **Skip for development** guest session; it is not included in production builds. Neither option authenticates gateway requests or replaces Tailscale identity and the gateway's server-side authorization policy. The gateway's existing SQLite store is for gateway data; account persistence is not implemented.
+The app sign-in is a **local UI profile only**; it does not authenticate to gateways and is held in memory for the app session. To access a host, the client adds that host in the Connect flow. On the first connection attempt, the host derives the caller identity from the connection's observed Tailscale source, records a pending request in its own SQLite database, and denies the session until its owner approves it in Settings. After approval, that host accepts all devices for the same Tailscale user and tailnet. Other hosts maintain independent approvals, so the client can connect to multiple gateways without sharing account credentials or account IDs. Development builds also include a **Skip for development** guest profile.
 
 ### Explicitly rejected for the MVP
 
@@ -290,7 +290,7 @@ The gateway listens on `GATEWAY_PORT` (default `8788`).
 | `LOG_LEVEL` | `info` | Set to `debug` for verbose gateway logs |
 | `REDACT_TOOL_PAYLOADS` | `true` | Leave `true` unless actively debugging — setting it to `false` writes tool arguments into the activity log |
 
-`.env` is gitignored. **No signing keys or session secrets belong in `.env`:** the gateway generates its Ed25519 signing key on first run and stores it in the OS keychain via Electron `safeStorage`. CI has no keychain, so the gateway falls back to an ephemeral in-memory key there — acceptable because CI never shares a gateway with a remote peer.
+`.env` is gitignored; do not put credentials or signing keys in it. Gateway access decisions are stored in that gateway's local SQLite database. The legacy Ed25519 token helper currently generates an in-memory key and is not used to authenticate MCP sessions, so those tokens are not durable across gateway restarts.
 
 ### Accounts & services to create
 
@@ -339,6 +339,26 @@ If the gateway graduates from a hackathon demo into something teammates download
 
 So: **yes, a completely free Windows `.exe` installer is achievable** — and **no**, building on a different OS does not make the macOS download free.
 
+#### One command, the right installer for the host OS
+
+`npm run package` runs the build, then **auto-detects the OS** and produces that platform's installer (`scripts/package.mjs`). A teammate on Linux runs the exact same command and gets the Linux installers:
+
+| Host OS | `npm run package` produces |
+| --- | --- |
+| macOS | `dist/*.dmg`, `dist/*-mac.zip` |
+| Linux | `dist/*.AppImage`, `dist/*.deb` |
+| Windows | `dist/*-Setup-*.exe` (NSIS) |
+
+Force a target with `--mac` / `--win` / `--linux`, produce just the unpacked app with `--dir`, or reuse the existing build with `--skip-build`:
+
+```bash
+npm run package             # installer for the current OS
+npm run package:linux       # = node scripts/package.mjs --linux
+npm run package -- --dir    # unpacked app directory only (no installer)
+```
+
+Build each OS's installer **on that same OS** — electron-builder's cross-compilation is unreliable (Windows needs Wine, macOS `dmg` needs macOS).
+
 #### A free Windows `.exe` installer
 
 electron-builder's NSIS target produces a standard `.exe` installer. No certificate, no account, no cost — just ship unsigned and accept the one-click SmartScreen prompt:
@@ -348,7 +368,7 @@ electron-builder's NSIS target produces a standard `.exe` installer. No certific
 {
   "win": {
     "target": ["nsis"],
-    "icon": "build/icon.ico"
+    "icon": "docs/logo.png"
   },
   "nsis": {
     "oneClick": false,
@@ -534,7 +554,11 @@ npx playwright install --with-deps  # Linux
 | `npm run test:integration` | Vitest — integration tests only, against the local fixture MCP server |
 | `npm run test:e2e` | Playwright Electron specs |
 | `npm run inspector` | Launches MCP Inspector against the running gateway |
-| `npm run package` | electron-builder installers for the current platform |
+| `npm run package` | Build + package an installer for the **current OS** (macOS → dmg+zip, Linux → AppImage+deb, Windows → nsis) |
+| `npm run package:mac` | Force a macOS installer (`--mac`) — build on macOS |
+| `npm run package:linux` | Force a Linux installer (`--linux`) — build on Linux |
+| `npm run package:win` | Force a Windows installer (`--win`) — build on Windows/CI |
+| `npm run package:dir` | Unpacked app directory only, no installer (`--dir`) |
 
 #### Development helper scripts (smoother DX)
 | Script | What it does |
@@ -598,7 +622,7 @@ Beyond the documented trade-offs, these are the sharp edges we expect to hit.
 
 - **Confused-deputy risk.** The gateway holds credentials for upstream MCP servers. A bug can let a remote caller act with the host's privileges.
 - **Prompt injection across the boundary.** Remote model output can steer tools that act on host resources. Authorization must be enforced server-side, never inferred from model intent.
-- **Token handling.** Issue, rotate, expire, and revoke — and never persist them in plaintext (OS keychain via `safeStorage`).
+- **Gateway access control.** Resolve identity from the incoming socket's actual source address; never trust a client-supplied IP or forwarded-IP header. Each MCP session must match the verified Tailscale identity and that gateway's approval.
 - **Logging as a liability.** Activity logs can capture sensitive arguments and file contents. Redaction must be the default, not a setting someone forgets.
 
 ### Platform & distribution

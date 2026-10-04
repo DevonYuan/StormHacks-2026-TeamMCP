@@ -4,7 +4,7 @@
  * Responsibilities:
  * - Window management
  * - Gateway process supervision (start/stop/restart)
- * - OS keychain integration (safeStorage) for signing keys
+ * - Account IPC between the renderer and the gateway
  * - IPC bridge between renderer and gateway
  * - Auto-updater
  * - System tray (optional)
@@ -12,9 +12,9 @@
 
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFile, spawn, ChildProcess } from "node:child_process";
-import { cpus, freemem, loadavg, totalmem } from "node:os";
+import { cpus, freemem, homedir, loadavg, totalmem } from "node:os";
 import {
   GatewayConfig,
   GatewayConfigSchema,
@@ -31,6 +31,7 @@ import { registerPolicyActivityIpcHandlers } from "./ipc/policy-activity.js";
 import { registerGatewayLifecycleIpcHandlers } from "./ipc/gateway-lifecycle.js";
 import { registerSystemIpcHandlers } from "./ipc/system.js";
 import { registerNetworkIpcHandlers } from "./ipc/network.js";
+import { registerApprovalIpcHandlers } from "./ipc/approvals.js";
 import type { HostStats } from "../shared/types.js";
 import pino from "pino";
 
@@ -47,6 +48,8 @@ let mainWindow: BrowserWindow | null = null;
 let isGatewayRunning = false;
 // Shared handle for an in-flight start so concurrent callers can't race.
 let gatewayStartPromise: Promise<void> | null = null;
+// Guards the async quit sequence so `before-quit` runs its shutdown only once.
+let quitting = false;
 
 // Initialize configuration
 // Settings the renderer may change. Never bindAddr: exposing goes through gateway:expose.
@@ -144,6 +147,50 @@ function startGateway(): Promise<void> {
   return gatewayStartPromise;
 }
 
+// Packaged GUI apps get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
+// excludes Homebrew, nvm and other user-managed locations, so a bare
+// `spawn("node", …)` fails with ENOENT and the gateway never starts. Probe the
+// usual install spots (mirroring TAILSCALE_CLI_CANDIDATES) and fall back to a
+// PATH lookup for terminal launches on Linux.
+const NODE_BINARY_CANDIDATES = [
+  process.env["TEAM_MCP_NODE"],
+  "/opt/homebrew/bin/node", // Homebrew (Apple Silicon)
+  "/usr/local/bin/node", // Homebrew (Intel) / manual install
+  "/usr/bin/node", // distro package (Linux)
+  "C:\\Program Files\\nodejs\\node.exe",
+  "C:\\Program Files (x86)\\nodejs\\node.exe",
+].filter((candidate): candidate is string => Boolean(candidate));
+
+/** Highest Node version installed under nvm, if any (nvm keeps them off PATH for GUI apps). */
+function findNvmNode(): string | null {
+  try {
+    const root = join(homedir(), ".nvm", "versions", "node");
+    const compare = (a: string, b: string): number => {
+      const [aMajor = 0, aMinor = 0, aPatch = 0] = a.slice(1).split(".").map(Number);
+      const [bMajor = 0, bMinor = 0, bPatch = 0] = b.slice(1).split(".").map(Number);
+      return bMajor - aMajor || bMinor - aMinor || bPatch - aPatch;
+    };
+    const versions = readdirSync(root)
+      .filter((name) => name.startsWith("v"))
+      .sort(compare);
+    for (const version of versions) {
+      const binary = join(root, version, "bin", "node");
+      if (existsSync(binary)) return binary;
+    }
+  } catch {
+    // No nvm install — fall through.
+  }
+  return null;
+}
+
+/** Absolute path to a usable Node (≥22.5 for node:sqlite), or "node" from PATH. */
+function resolveNodeBinary(): string {
+  for (const candidate of NODE_BINARY_CANDIDATES) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return findNvmNode() ?? "node";
+}
+
 /** Spawn the standalone gateway and resolve after its HTTP API is ready. */
 function startGatewayProcess(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -160,10 +207,14 @@ function startGatewayProcess(): Promise<void> {
 
     logger.info("Starting gateway process...");
 
-    // Determine gateway entry point
+    // Determine gateway entry point. The gateway runs under the SYSTEM node (it
+    // needs node:sqlite ≥22.5), and non-Electron Node cannot read files inside
+    // app.asar — so electron-builder unpacks dist/backend/gateway/** (see
+    // build.asarUnpack) and we rewrite the asar path to its unpacked location.
+    // The replace is a no-op when asar is disabled.
     const gatewayEntry = isDev
       ? join(__dirname, "../../../src/backend/gateway/index.ts") // tsx will handle this
-      : join(__dirname, "../gateway/index.js");
+      : join(__dirname, "../gateway/index.js").replace("app.asar", "app.asar.unpacked");
 
     const args = isDev
       ? ["--port", String(gatewayConfig.port), "--bind", gatewayConfig.bindAddr]
@@ -173,7 +224,7 @@ function startGatewayProcess(): Promise<void> {
     // `node --import tsx` directly — not `npx tsx` — keeps gatewayProcess as the real
     // process so SIGTERM kills it cleanly; an npx wrapper leaks the child (and the port).
     const child = spawn(
-      "node",
+      resolveNodeBinary(),
       isDev ? ["--import", "tsx", gatewayEntry, ...args] : [gatewayEntry, ...args],
       {
         env: {
@@ -226,7 +277,12 @@ function startGatewayProcess(): Promise<void> {
       }
     });
 
+    // Keep the tail of the child's stderr so a bind failure (e.g. EADDRINUSE)
+    // surfaces in the start error instead of just a generic timeout.
+    let stderrTail = "";
+
     child.stderr?.on("data", (data) => {
+      stderrTail = (stderrTail + data.toString()).slice(-600);
       logger.error({ gateway: true }, data.toString());
       mainWindow?.webContents.send(IPC_CHANNELS.GATEWAY_LOG, {
         timestamp: Date.now(),
@@ -266,7 +322,7 @@ function startGatewayProcess(): Promise<void> {
       if (!ready) {
         fail(
           new Error(
-            "Gateway failed to start within 10 seconds. Check the gateway logs for the bind error.",
+            `Gateway failed to start within 10 seconds.${stderrTail ? `\n${stderrTail.trim()}` : ""}`,
           ),
         );
       }
@@ -320,7 +376,7 @@ function startGatewayProcess(): Promise<void> {
           new Error(
             `Gateway exited before becoming ready (code ${code ?? "?"}${
               signal ? `, signal ${signal}` : ""
-            }). Check the gateway logs for the bind error.`,
+            }).${stderrTail ? `\n${stderrTail.trim()}` : ""}`,
           ),
         );
       }
@@ -333,21 +389,38 @@ function stopGateway(): Promise<void> {
   return new Promise((resolve) => {
     const proc = gatewayProcess;
     if (!proc) {
+      gatewayProcess = null;
+      isGatewayRunning = false;
       resolve();
       return;
     }
 
     logger.info("Stopping gateway process...");
 
-    const finish = (): void => resolve();
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      // Reset state here too: the child's own exit handler normally does this,
+      // but expose/restart paths must never see a stale "running" flag.
+      if (gatewayProcess === proc) {
+        gatewayProcess = null;
+        isGatewayRunning = false;
+        mainWindow?.webContents.send(
+          IPC_CHANNELS.GATEWAY_STATUS,
+          getGatewayStatus(),
+        );
+      }
+      resolve();
+    };
     proc.once("exit", finish);
     proc.once("error", finish);
     proc.kill("SIGTERM");
 
-    // Force kill after 5 seconds if it hasn't exited.
+    // Force kill after 3 seconds if it hasn't exited.
     setTimeout(() => {
-      if (gatewayProcess === proc) proc.kill("SIGKILL");
-    }, 5000);
+      if (!done) proc.kill("SIGKILL");
+    }, 3000);
   });
 }
 
@@ -443,11 +516,14 @@ interface LocalTailnetInfo {
 }
 
 // The Tailscale GUI apps don't put their CLI on PATH, so probe the usual spots.
+// Prefer the standalone CLI / wrapper over the macOS GUI bundle binary: under a
+// GUI-launched app's minimal environment the bundle binary can print
+// "The Tailscale GUI failed to start…" on stdout and still exit 0.
 const TAILSCALE_CLI_CANDIDATES = [
   "tailscale",
-  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
   "/usr/local/bin/tailscale",
   "/opt/homebrew/bin/tailscale",
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
   "C:\\Program Files\\Tailscale\\tailscale.exe",
   "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
 ];
@@ -484,15 +560,21 @@ function getLocalTailnet(): Promise<LocalTailnetInfo> {
             const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
             // The 100.x address is only bindable while the tunnel is actually up.
             const up = state === "Running" && ips.length > 0;
+            // Prefer the IPv4 tailnet address: it is what peers dial, and binding
+            // only to the IPv6 ULA would break their host:port URL.
+            const ipv4 = ips.find((addr) => /^\d{1,3}(\.\d{1,3}){3}$/.test(addr));
             resolve({
               available: up,
               state,
-              ip: up ? ips[0] : null,
+              ip: up ? (ipv4 ?? ips[0]) : null,
               hostname: parsed?.Self?.HostName ?? null,
               dnsName: parsed?.Self?.DNSName ?? null,
             });
           } catch {
-            resolve(down(null));
+            // Ran but returned non-JSON (e.g. the macOS GUI binary printing a
+            // startup error on stdout). Treat it like a failure and try the next
+            // location rather than giving up with "unavailable".
+            resolve(attempt(index + 1));
           }
         },
       );
@@ -558,6 +640,8 @@ function setupIpcHandlers(): void {
     isGatewayRunning: () => isGatewayRunning,
   });
 
+  registerApprovalIpcHandlers({ gatewayFetch, ensureGatewayRunning });
+
   ipcMain.on(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, (_event, url: string) => {
     void shell.openExternal(url);
   });
@@ -590,8 +674,12 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  void stopGateway();
+app.on("before-quit", (event) => {
+  // Wait for the gateway child to exit so it can't be orphaned holding its port.
+  if (quitting || !gatewayProcess) return;
+  event.preventDefault();
+  quitting = true;
+  void stopGateway().finally(() => app.quit());
 });
 
 // Handle protocol links (for OAuth callbacks, etc.)

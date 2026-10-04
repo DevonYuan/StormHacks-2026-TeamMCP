@@ -1,5 +1,5 @@
 /** Return whether an address identifies the local loopback interface. */
-function isLoopbackAddress(address: string): boolean {
+export function isLoopbackAddress(address: string): boolean {
   return (
     address === "127.0.0.1" ||
     address.startsWith("127.") ||
@@ -15,5 +15,9 @@ export function isManagementRequestAllowed(
   path: string,
 ): boolean {
   if (isLoopbackAddress(localAddress)) return true;
-  return path === "/health" || path === "/mcp" || path.startsWith("/mcp/");
+  return (
+    path === "/health" ||
+    path === "/mcp" ||
+    path.startsWith("/mcp/")
+  )
 }

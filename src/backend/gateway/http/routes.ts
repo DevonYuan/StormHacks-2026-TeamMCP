@@ -1,14 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Logger } from 'pino'
 import { ZodError } from 'zod'
-import type { AuthManager } from '../auth/auth.js'
+import { handleApprovalsApi } from './api/approvals.js'
 import { isManagementRequestAllowed } from '../http-access.js'
 import { handleActivityApi, handlePolicyApi } from './api/policy-activity.js'
 import { handlePeersApi, handleShareApi, handleTailscaleApi } from './api/network.js'
 import { handleServersApi } from './api/servers.js'
 import { handleHealthApi, handleStatusApi } from './api/status.js'
 import type { HttpContext } from './context.js'
-import { CORS_HEADERS, readJson, sendJson } from './response.js'
+import { CORS_HEADERS, sendJson } from './response.js'
 
 export type { HttpContext } from './context.js'
 
@@ -41,11 +41,6 @@ export class GatewayHttpRouter {
 
       if (path === '/health') {
         sendJson(res, 200, { status: 'ok', ...ctx.proxyServer.getStatus() })
-        return
-      }
-
-      if (path === '/auth/token' && req.method === 'POST') {
-        await this.handleTokenExchange(req, res, ctx.authManager)
         return
       }
 
@@ -100,6 +95,8 @@ export class GatewayHttpRouter {
         return
       case 'servers':
         return handleServersApi(req, res, id, action, ctx)
+      case 'approvals':
+        return handleApprovalsApi(req, res, id, action, ctx)
       case 'share':
         return handleShareApi(req, res, ctx)
       case 'peers':
@@ -131,20 +128,4 @@ export class GatewayHttpRouter {
     }
   }
 
-  /** Exchange a connecting client's address for an authenticated session result. */
-  private async handleTokenExchange(
-    req: IncomingMessage,
-    res: ServerResponse,
-    authManager: AuthManager,
-  ): Promise<void> {
-    const body = await readJson(req)
-
-    try {
-      const clientIp = typeof body.clientIp === 'string' ? body.clientIp : '127.0.0.1'
-      const result = await authManager.authenticateConnection(clientIp)
-      sendJson(res, 200, result)
-    } catch (error: unknown) {
-      sendJson(res, 500, { success: false, error: String(error) })
-    }
-  }
 }
