@@ -53,6 +53,33 @@ function Icon({ page }: { page: Page }): React.JSX.Element {
   )
 }
 
+/** Live client-mode connection, driven by the same server list as Connected peers. */
+function ClientStatus({
+  servers,
+}: {
+  servers: { id: string; name?: string; transport: string; running: boolean }[]
+}): React.JSX.Element {
+  const connectedHosts = servers.filter((s) => s.transport === 'streamable-http' && s.running).length
+  const connected = connectedHosts > 0
+  return (
+    <div className="glass-card mt-auto rounded-xl p-3">
+      <div className="flex items-center gap-2 text-body font-medium text-ink-emphasis">
+        <span
+          className={`size-2 rounded-full ${
+            connected ? 'bg-success motion-safe:animate-breathe' : 'bg-status-offline'
+          }`}
+        />
+        {connected ? 'Connected' : 'Not connected'}
+      </div>
+      <p className="mt-1 text-caption text-ink">
+        {connected
+          ? `${connectedHosts} host${connectedHosts === 1 ? '' : 's'} · their MCP tools are available here`
+          : 'Connect to a teammate’s exposed gateway to use their MCP servers.'}
+      </p>
+    </div>
+  )
+}
+
 /** Render navigation, gateway state, and the active demo profile. */
 function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): React.JSX.Element {
   const { devices, servers, host, status, opening, startGateway, stopGateway } = useNetworkData()
@@ -60,6 +87,11 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
   const running = status?.running ?? false
   const blocked = devices.filter((d) => d.status === 'blocked').length
   const online = devices.filter((d) => d.status === 'online').length
+  // A peer the host has disconnected is not a shared server anymore, even for the
+  // moment before the next poll deletes the row.
+  const listedServers = servers.filter(
+    (s) => s.running || !(s.name ?? s.id).startsWith('peer:')
+  )
 
   const nav: { page: Page; badge?: { text: number; alert: boolean } }[] = [
     { page: 'Network', badge: blocked ? { text: blocked, alert: true } : undefined },
@@ -113,7 +145,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
       <div className="mt-8 px-2.5">
         <div className="text-overline text-ink-muted uppercase">Shared servers</div>
         <ul className="mt-2.5 flex flex-col gap-2">
-          {servers.map((s) => (
+          {listedServers.map((s) => (
             <li key={s.id} className="flex items-center gap-2.5 font-mono text-code">
               <span
                 className={`size-1.5 shrink-0 rounded-full ${s.running ? 'bg-status-online' : 'bg-status-offline'}`}
@@ -124,7 +156,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
               <span className="ml-auto shrink-0 text-caption text-ink-muted">{s.transport}</span>
             </li>
           ))}
-          {servers.length === 0 && <li className="text-caption text-ink-muted">No servers registered</li>}
+          {listedServers.length === 0 && <li className="text-caption text-ink-muted">No servers registered</li>}
         </ul>
       </div>
 
@@ -169,12 +201,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
           </div>
         </div>
       ) : (
-        <div className="glass-card mt-auto rounded-xl p-3">
-          <div className="text-body font-medium text-ink-emphasis">Client mode</div>
-          <p className="mt-1 text-caption text-ink">
-            Connect to a teammate’s exposed gateway to use their MCP servers.
-          </p>
-        </div>
+        <ClientStatus servers={servers} />
       )}
 
       {user && (

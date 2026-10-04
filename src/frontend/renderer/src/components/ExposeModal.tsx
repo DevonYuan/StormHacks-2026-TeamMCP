@@ -123,11 +123,11 @@ export function ExposeModal({
         <div className="space-y-3">
           <div
             className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-              exposed ? 'border-status-online/30 bg-status-online/5' : 'border-border bg-surface text-ink-muted'
+              exposed ? 'border-success/30 bg-success/5' : 'border-border bg-surface text-ink-muted'
             }`}
           >
             <span
-              className={`size-2 rounded-full ${exposed ? 'bg-status-online motion-safe:animate-breathe' : 'bg-status-offline'}`}
+              className={`size-2 rounded-full ${exposed ? 'bg-success motion-safe:animate-breathe' : 'bg-status-offline'}`}
             />
             {exposed ? 'Exposed to your tailnet' : 'Running locally only'}
           </div>

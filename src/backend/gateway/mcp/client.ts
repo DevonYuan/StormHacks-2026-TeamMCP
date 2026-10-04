@@ -30,6 +30,7 @@ import {
   GetPromptResult,
 } from '../../shared/protocol.js'
 import { GatewayConfig } from '../../shared/config.js'
+import { isPeerConfig, isPeerSessionClosed } from '../../shared/peer.js'
 import pino from 'pino'
 
 const logger = pino({ name: 'mcp-client-manager' })
@@ -56,6 +57,13 @@ export class MCPClientManager extends EventEmitter {
   private config: GatewayConfig
   private reconnectTimers = new Map<string, NodeJS.Timeout>()
   private healthCheckInterval?: NodeJS.Timeout
+  private peerWatchInterval?: NodeJS.Timeout
+  private peerWatchRunning = false
+  /** Consecutive failed liveness checks per peer. A closed session drops immediately. */
+  private peerMisses = new Map<string, number>()
+  /** Nested disconnects (local remove, remote drop) must not treat our own close as a host kick. */
+  private lossSuppress = new Map<string, number>()
+  private dropping = new Set<string>()
 
   constructor(config: GatewayConfig) {
     super()
@@ -93,6 +101,7 @@ export class MCPClientManager extends EventEmitter {
       )
 
       this.setupNotificationHandlers(client, serverConfig.id)
+      this.watchPeerSession(client, serverConfig)
 
       // connect() performs the MCP initialize handshake
       await client.connect(transport)
@@ -139,6 +148,16 @@ export class MCPClientManager extends EventEmitter {
         }
         return new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: { headers: config.headers },
+          // A host Disconnect closes the SSE stream. Fail that immediately instead of
+          // quietly reopening the session, which left the client looking connected.
+          reconnectionOptions: isPeerConfig(config)
+            ? {
+                maxRetries: 0,
+                initialReconnectionDelay: 0,
+                maxReconnectionDelay: 0,
+                reconnectionDelayGrowFactor: 1,
+              }
+            : undefined,
         })
       }
 
@@ -287,39 +306,56 @@ export class MCPClientManager extends EventEmitter {
 
   /**
    * Disconnect from a server.
+   * Streamable-HTTP peers send DELETE first so the host drops the session immediately
+   * instead of waiting out the idle window.
    */
   async disconnect(serverId: string): Promise<void> {
-    const connection = this.connections.get(serverId)
-    if (!connection) return
+    this.pushSuppress(serverId)
+    try {
+      const connection = this.connections.get(serverId)
+      if (!connection) return
 
-    // Clear any reconnect timer
-    const timer = this.reconnectTimers.get(serverId)
-    if (timer) {
-      clearTimeout(timer)
-      this.reconnectTimers.delete(serverId)
-    }
-
-    if (connection.client) {
-      try {
-        await connection.client.close()
-      } catch (error) {
-        logger.warn({ serverId, error }, 'Error closing MCP client')
+      // Clear any reconnect timer
+      const timer = this.reconnectTimers.get(serverId)
+      if (timer) {
+        clearTimeout(timer)
+        this.reconnectTimers.delete(serverId)
       }
-    } else if (connection.transport) {
-      // connect() can fail before the client is assigned, leaving the transport open.
-      try {
-        await connection.transport.close()
-      } catch (error) {
-        logger.warn({ serverId, error }, 'Error closing MCP transport')
+      this.peerMisses.delete(serverId)
+
+      const transport = connection.transport
+      if (transport && 'terminateSession' in transport) {
+        try {
+          await transport.terminateSession()
+        } catch (error) {
+          logger.warn({ serverId, error }, 'Error terminating MCP session')
+        }
       }
+
+      if (connection.client) {
+        try {
+          await connection.client.close()
+        } catch (error) {
+          logger.warn({ serverId, error }, 'Error closing MCP client')
+        }
+      } else if (transport) {
+        // connect() can fail before the client is assigned, leaving the transport open.
+        try {
+          await transport.close()
+        } catch (error) {
+          logger.warn({ serverId, error }, 'Error closing MCP transport')
+        }
+      }
+
+      connection.status = 'disconnected'
+      this.emit('statusChange', serverId, 'disconnected')
+      this.emit('disconnected', serverId)
+
+      this.connections.delete(serverId)
+      logger.info({ serverId }, 'MCP client disconnected')
+    } finally {
+      this.popSuppress(serverId)
     }
-
-    connection.status = 'disconnected'
-    this.emit('statusChange', serverId, 'disconnected')
-    this.emit('disconnected', serverId)
-
-    this.connections.delete(serverId)
-    logger.info({ serverId }, 'MCP client disconnected')
   }
 
   /**
@@ -332,6 +368,10 @@ export class MCPClientManager extends EventEmitter {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval)
       this.healthCheckInterval = undefined
+    }
+    if (this.peerWatchInterval) {
+      clearInterval(this.peerWatchInterval)
+      this.peerWatchInterval = undefined
     }
   }
 
@@ -352,6 +392,7 @@ export class MCPClientManager extends EventEmitter {
 
   /**
    * Start health checking for all connections.
+   * Peers are watched on a short interval and are not reconnected after the host closes them.
    */
   startHealthChecks(intervalMs = 30000): void {
     if (this.healthCheckInterval) return
@@ -359,6 +400,7 @@ export class MCPClientManager extends EventEmitter {
     this.healthCheckInterval = setInterval(async () => {
       for (const connection of this.connections.values()) {
         if (connection.status !== 'connected') continue
+        if (isPeerConfig(connection.config)) continue
         try {
           const started = Date.now()
           await connection.client.listTools()
@@ -376,6 +418,99 @@ export class MCPClientManager extends EventEmitter {
         }
       }
     }, intervalMs)
+
+    this.startPeerWatch()
+  }
+
+  /**
+   * Backup for a host Disconnect when the SSE stream does not surface it.
+   * A closed session drops on the first failed ping; other errors need a few misses
+   * so a slow tailnet does not look like a disconnect.
+   */
+  private startPeerWatch(intervalMs = 1500): void {
+    if (this.peerWatchInterval) return
+    this.peerWatchInterval = setInterval(() => {
+      void this.checkPeers()
+    }, intervalMs)
+  }
+
+  private async checkPeers(): Promise<void> {
+    if (this.peerWatchRunning) return
+    this.peerWatchRunning = true
+    try {
+      const peers = this.getAllConnections().filter(
+        (connection) => connection.status === 'connected' && isPeerConfig(connection.config)
+      )
+      await Promise.all(peers.map((connection) => this.probePeer(connection)))
+    } finally {
+      this.peerWatchRunning = false
+    }
+  }
+
+  private async probePeer(connection: MCPClientConnection): Promise<void> {
+    if (this.lossSuppressed(connection.serverId)) return
+    try {
+      await connection.client.ping({ timeout: 2000 })
+      this.peerMisses.delete(connection.serverId)
+      connection.lastPing = Date.now()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const misses = (this.peerMisses.get(connection.serverId) ?? 0) + 1
+      this.peerMisses.set(connection.serverId, misses)
+      if (isPeerSessionClosed(message) || misses >= 3) {
+        await this.dropPeer(connection.serverId, message)
+      }
+    }
+  }
+
+  /**
+   * When the host closes the session, drop the peer instead of reconnecting.
+   * `peerLost` is what removes it from Connected peers and the sidebar.
+   */
+  private watchPeerSession(client: Client, serverConfig: ServerConfig): void {
+    if (!isPeerConfig(serverConfig)) return
+    client.onerror = (error) => {
+      if (this.lossSuppressed(serverConfig.id)) return
+      const message = error instanceof Error ? error.message : String(error)
+      if (!isPeerSessionClosed(message)) return
+      void this.dropPeer(serverConfig.id, message)
+    }
+    client.onclose = () => {
+      if (this.lossSuppressed(serverConfig.id)) return
+      void this.dropPeer(serverConfig.id, 'Connection closed')
+    }
+  }
+
+  private async dropPeer(serverId: string, reason: string): Promise<void> {
+    if (this.dropping.has(serverId) || this.lossSuppressed(serverId)) return
+    const connection = this.connections.get(serverId)
+    // Only a session that actually came up. A failed handshake must not delete a saved peer.
+    if (!connection || connection.status !== 'connected' || !isPeerConfig(connection.config)) return
+    this.dropping.add(serverId)
+    this.pushSuppress(serverId)
+    try {
+      logger.info({ serverId, reason }, 'Remote host closed the peer session')
+      this.emit('peerLost', serverId, reason)
+      await this.disconnect(serverId)
+    } finally {
+      this.popSuppress(serverId)
+      this.dropping.delete(serverId)
+      this.peerMisses.delete(serverId)
+    }
+  }
+
+  private pushSuppress(serverId: string): void {
+    this.lossSuppress.set(serverId, (this.lossSuppress.get(serverId) ?? 0) + 1)
+  }
+
+  private popSuppress(serverId: string): void {
+    const next = (this.lossSuppress.get(serverId) ?? 1) - 1
+    if (next <= 0) this.lossSuppress.delete(serverId)
+    else this.lossSuppress.set(serverId, next)
+  }
+
+  private lossSuppressed(serverId: string): boolean {
+    return (this.lossSuppress.get(serverId) ?? 0) > 0 || this.dropping.has(serverId)
   }
 
   private scheduleReconnect(config: ServerConfig): void {

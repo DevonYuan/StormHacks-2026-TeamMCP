@@ -10,31 +10,38 @@ export function ConnectModal({
   open: boolean
   onClose: () => void
 }): React.JSX.Element {
-  const { available, servers, addPeer, probePeer, removePeer, refresh } = useNetworkData()
+  const { available, servers, addPeer, probePeer, removePeer } = useNetworkData()
   const [address, setAddress] = useState('')
   const [busy, setBusy] = useState<null | 'test' | 'connect'>(null)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
+  const [outcome, setOutcome] = useState<'idle' | 'success' | 'error'>('idle')
 
-  const peers = useMemo(() => servers.filter((s) => s.transport === 'streamable-http'), [servers])
+  // Only a live session is listed. The gateway does not persist a peer until the
+  // handshake succeeds, so a failure never appears here.
+  const peers = useMemo(
+    () => servers.filter((s) => s.transport === 'streamable-http' && s.running),
+    [servers]
+  )
 
   const run = async (mode: 'test' | 'connect'): Promise<void> => {
     setBusy(mode)
     setError(null)
     setOk(null)
+    setOutcome('idle')
     try {
-      // Test reachability before registering. A failed handshake must not land in
-      // Connected peers, even briefly.
-      const probed = await probePeer(address)
       if (mode === 'test') {
+        const probed = await probePeer(address)
+        setOutcome('success')
         setOk(`Reachable — ${probed.tools.length} tool(s) available`)
         return
       }
+      // addPeer connects first and only then registers the peer.
       const result = await addPeer(address)
-      await refresh()
+      setOutcome('success')
       setOk(`Connected — ${result.tools.length} tool(s) from ${result.url}`)
-      setAddress('')
     } catch (e) {
+      setOutcome('error')
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
@@ -57,15 +64,45 @@ export function ConnectModal({
               Peer address
             </label>
             <div className="mt-1.5 flex gap-2">
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void run('connect')
-                }}
-                placeholder="100.64.12.21:8788"
-                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-2 font-mono text-[12px] text-ink outline-none focus-visible:border-brand"
-              />
+              <div className="relative min-w-0 flex-1">
+                <input
+                  value={address}
+                  onChange={(e) => {
+                    setAddress(e.target.value)
+                    setOutcome('idle')
+                    setError(null)
+                    setOk(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void run('connect')
+                  }}
+                  placeholder="100.64.12.21:8788"
+                  aria-invalid={outcome === 'error'}
+                  className={`w-full rounded-lg border px-2.5 py-2 pr-8 font-mono text-[12px] text-ink outline-none ${
+                    outcome === 'success'
+                      ? 'border-success bg-success/15 focus-visible:border-success'
+                      : outcome === 'error'
+                        ? 'border-status-blocked bg-status-blocked/10 focus-visible:border-status-blocked'
+                        : 'border-border bg-surface focus-visible:border-brand'
+                  }`}
+                />
+                {outcome === 'success' && (
+                  <span
+                    className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm text-success"
+                    aria-label="Connection successful"
+                  >
+                    ✓
+                  </span>
+                )}
+                {outcome === 'error' && (
+                  <span
+                    className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm text-status-blocked"
+                    aria-label="Connection failed"
+                  >
+                    ✕
+                  </span>
+                )}
+              </div>
               <button
                 onClick={() => void run('test')}
                 disabled={!address.trim() || busy !== null}
@@ -88,7 +125,7 @@ export function ConnectModal({
           </button>
 
           {error && <p className="text-xs text-status-blocked">{error}</p>}
-          {ok && <p className="text-xs text-online">{ok}</p>}
+          {ok && <p className="text-xs text-success">{ok}</p>}
 
           {peers.length > 0 && (
             <div className="border-t border-border pt-3">
@@ -101,11 +138,16 @@ export function ConnectModal({
                     key={p.id}
                     className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs"
                   >
-                    <span className={`size-1.5 rounded-full ${p.running ? 'bg-status-online' : 'bg-status-offline'}`} />
+                    <span className="size-1.5 rounded-full bg-success" />
                     <span className="truncate font-mono">{p.name ?? p.id}</span>
                     <span className="ml-auto shrink-0 text-ink-muted">{p.tools} tools</span>
                     <button
-                      onClick={() => void removePeer(p.id)}
+                      onClick={() => {
+                        void removePeer(p.id).catch((e: unknown) => {
+                          setOutcome('error')
+                          setError(e instanceof Error ? e.message : String(e))
+                        })
+                      }}
                       title="Remove peer"
                       aria-label={`Remove ${p.name ?? p.id}`}
                       className="rounded p-0.5 text-ink-muted hover:text-status-blocked"

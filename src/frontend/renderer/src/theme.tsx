@@ -5,6 +5,7 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 
 const STORAGE_KEY = 'theme'
 
+/** Light on first launch; System and Dark are explicit choices made in Settings. */
 function readPreference(): ThemePreference {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePeerUrl, peerHost } from '@shared/peer'
+import { isPeerConfig, isPeerSessionClosed, normalizePeerUrl, peerHost } from '@shared/peer'
+import { TransportType } from '@shared/protocol'
 
 describe('normalizePeerUrl', () => {
   it('adds the default port and /mcp to a bare host', () => {
@@ -25,6 +26,39 @@ describe('normalizePeerUrl', () => {
 
   it('rejects malformed input', () => {
     expect(() => normalizePeerUrl('http://')).toThrow()
+  })
+})
+
+describe('isPeerConfig', () => {
+  it('matches a registered teammate gateway', () => {
+    expect(
+      isPeerConfig({
+        name: 'peer:100.64.12.21:8788',
+        transport: TransportType.StreamableHttp,
+        description: 'Remote Team MCP Gateway peer',
+      })
+    ).toBe(true)
+  })
+
+  it('ignores local stdio servers', () => {
+    expect(
+      isPeerConfig({
+        name: 'files',
+        transport: TransportType.Stdio,
+        description: 'Remote Team MCP Gateway peer',
+      })
+    ).toBe(false)
+  })
+})
+
+describe('isPeerSessionClosed', () => {
+  it('matches a host-closed session', () => {
+    expect(isPeerSessionClosed('Maximum reconnection attempts (0) exceeded.')).toBe(true)
+    expect(isPeerSessionClosed('Session not found')).toBe(true)
+  })
+
+  it('ignores a timeout', () => {
+    expect(isPeerSessionClosed('Request timed out')).toBe(false)
   })
 })
 

@@ -374,8 +374,9 @@ export class MCPProxyServer {
   }
 
   /**
-   * Close every open session for a device. The client may re-initialize;
-   * use a policy deny rule to keep it out.
+   * Close every open session for a device. The remote Tether client treats
+   * the closed stream as a disconnect and removes the peer instead of
+   * reconnecting. Use a policy deny rule to keep them from connecting again.
    */
   async closeSessionsForDevice(deviceId: string): Promise<number> {
     const sids = [...this.activeSessions]
