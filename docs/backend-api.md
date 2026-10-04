@@ -49,11 +49,23 @@ Liveness probe. Does **not** reflect MCP server connectivity.
 
 **MCP Streamable HTTP endpoint** — the single unified entry point for all MCP protocol traffic (`initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, notifications). All session management is handled internally by the proxy.
 
-> **Note:** This is the only endpoint MCP clients (Claude Desktop, custom agents, etc.) should use. The gateway authenticates the request via the `Authorization: Bearer <token>` header, evaluates policy, forwards to the appropriate upstream MCP server(s), and returns the aggregated/namespaced result.
+> **Note:** This is the only endpoint MCP clients (Claude Desktop, custom agents, etc.) should use. The gateway resolves the caller's identity from the **source IP of the connection**, evaluates policy per request, forwards to the appropriate upstream MCP server(s), and returns the aggregated/namespaced result.
 
 **Request:** Standard MCP JSON-RPC 2.0 over HTTP (see [MCP Spec](https://modelcontextprotocol.io/specification/2025-06-18)).
 
-**Authentication:** `Authorization: Bearer <Ed25519 token>` (obtained via `/auth/token`).
+**Authentication:** Identity is derived from the connection's source IP — there is **no `Authorization` header requirement** on `/mcp`:
+
+| Source IP | Resolved identity |
+| --- | --- |
+| Tailnet `100.x.y.z` (Tailscale available) | `tailscale whois <ip>` → `{ user, device, deviceId, tailnet }` |
+| Loopback / private (`127.0.0.1`, `::1`, `10.*`, `192.168.*`) | `local@dev` (local development) |
+| Anything else, or a failed lookup | Falls back to `local@dev` — see the note below |
+
+The session is tracked by the `Mcp-Session-Id` header (returned on `initialize`); the gateway mints an Ed25519 session token internally. `POST /auth/token` can exchange an IP for a token explicitly, but the proxy itself authenticates by source IP.
+
+> **Fail-open caveat.** When identity resolution fails, the proxy still opens the session with a
+> `local@dev` identity, and the bootstrapped dev policy allows `local@dev`. Until that fallback is
+> tightened, treat the gateway as reachable-but-not-strictly-authenticated when `whois` is unavailable.
 
 **Response:** MCP JSON-RPC 2.0 response or SSE stream.
 
@@ -444,6 +456,80 @@ If unavailable:
 
 ---
 
+### `GET /api/share`
+
+Canonical "what to share" info for the **expose** flow — the address teammates should connect to.
+
+**Response (200):**
+
+```json
+{
+  "running": true,
+  "address": "100.64.12.8:8788",
+  "mcpUrl": "http://100.64.12.8:8788/mcp",
+  "bindAddress": "100.64.12.8",
+  "port": 8788,
+  "localOnly": false,
+  "connectedPeers": 1,
+  "servers": 3,
+  "tailscale": {
+    "available": true,
+    "ip": "100.64.12.8",
+    "hostname": "dev-machine",
+    "dnsName": "dev-machine.example.ts.net"
+  }
+}
+```
+
+`localOnly` is `true` when the gateway is bound to loopback (`127.0.0.1`) — peers cannot reach it.
+
+> Exposing requires binding a non-loopback interface. The Electron main process owns this via the
+> `gateway:expose` IPC: it reads the local tailnet IP directly (`tailscale status --json`), sets
+> `bindAddr`, and (re)starts the gateway. The renderer never rebinds the gateway itself.
+
+---
+
+### `POST /api/peers`
+
+Register (or probe) a teammate's exposed gateway as a **Streamable-HTTP upstream** so their MCP
+tools appear locally, namespaced under `peer:<host>__<tool>`.
+
+**Request:**
+
+```json
+{ "address": "100.64.12.21:8788", "probe": false }
+```
+
+`address` accepts `host`, `host:port`, or a full URL (with or without `/mcp`); it is normalized by
+`normalizePeerUrl`. When `probe: true`, the gateway validates reachability and discovers tools
+**without** keeping the peer registered.
+
+**Response (201 — registered):**
+
+```json
+{
+  "success": true,
+  "url": "http://100.64.12.21:8788/mcp",
+  "tools": [{ "name": "read_file", "description": "..." }],
+  "server": { "...": "ServerConfig" }
+}
+```
+
+**Response (200 — probe):** the same shape with `"probe": true` and no `server`.
+
+**Errors:** `400` invalid address (`{ "error": "Peer address is invalid" }`); `502` unreachable
+(`{ "error": "Could not reach <host>: ..." }`). A failed add is rolled back — nothing is persisted.
+
+---
+
+### `DELETE /api/peers/:id`
+
+Disconnect and remove a previously registered peer.
+
+**Response (200):** `{ "success": true }`
+
+---
+
 ## Types Reference
 
 ### `ServerConfig` (from `src/backend/shared/protocol.ts`)
@@ -551,12 +637,25 @@ interface GatewayStatus {
 
 ## Authentication & Authorization Flow
 
-1. **Client obtains token** → `POST /auth/token` → receives Ed25519 JWT.
-2. **Client calls MCP** → `POST /mcp` with `Authorization: Bearer <token>`.
-3. **Gateway validates token** → extracts `Identity` + `permissions` (scoped servers/tools).
-4. **PolicyEngine evaluates** → `defaultEffect` + ordered rules → `allow` / `deny`.
-5. **If allowed** → request forwarded to upstream MCP server(s), response logged to activity.
-6. **If denied** → `403` error returned, activity logged with `success: false`, `errorCode: 403`.
+1. **Resolve identity** → on `POST /mcp` `initialize`, the gateway reads `req.socket.remoteAddress` and resolves it to an `Identity` (Tailscale `whois` for tailnet IPs; `local@dev` for loopback/private).
+2. **Open session** → a per-session MCP `Server` + `StreamableHTTPServerTransport` is created, keyed by `Mcp-Session-Id`; the identity + an internal Ed25519 token are stored for that session.
+3. **PolicyEngine evaluates** → on each `tools/call` / `resources/read` / `prompts/get`, `defaultEffect` + ordered rules → `allow` / `deny`.
+4. **If allowed** → request forwarded to the upstream MCP server, response logged to activity.
+5. **If denied** → `403`, and the activity log records `success: false`, `errorCode: 403`.
+
+### Tailscale identity & prerequisites
+
+The gateway never calls Tailscale's API — it shells out to the local CLI (`tailscale version`,
+`tailscale status --json`, `tailscale whois <ip>`). To use cross-network identity:
+
+- Tailscale must be installed, signed in, and have the CLI on `PATH` (or set `TAILSCALE_CLI`).
+- The connecting peer must be a tailnet `100.x` address — which requires the gateway to be **bound to
+  the tailnet interface**, not loopback. See `GET /api/share` and the `gateway:expose` action.
+- Both machines must be on the **same tailnet** (same account, a user invite, or a shared node).
+- No API key, OAuth client, auth key, or plan upgrade is required; default ACLs (allow-all) need no changes.
+
+When Tailscale is unavailable, identity resolution is skipped and the session falls back to
+`local@dev` (see the caveat under `POST /mcp`).
 
 ---
 
@@ -604,6 +703,10 @@ Environment variables (all optional):
 | `REDACT_TOOL_PAYLOADS` | true | Omit payloads from activity log |
 | `LOG_LEVEL` | info | pino log level |
 
+> For **remote peers**, bind the host's tailnet IP instead of loopback (`--bind 100.x.y.z`, or set
+> `GATEWAY_BIND_ADDR`). In the app, the **Open a connection** action does this for you via the
+> main-process `gateway:expose` IPC. **Never bind `0.0.0.0`.**
+
 ---
 
 ## Related Files
@@ -614,6 +717,8 @@ Environment variables (all optional):
 | `src/backend/gateway/mcp/server.ts` | MCP proxy (Streamable HTTP, policy, activity) |
 | `src/backend/gateway/mcp/client.ts` | Upstream MCP client manager (stdio/HTTP/SSE) |
 | `src/backend/gateway/auth/auth.ts` | Ed25519 token issuance + Tailscale integration |
+| `src/backend/gateway/auth/tailscale.ts` | `tailscale status --json` / `tailscale whois` identity resolution |
+| `src/backend/shared/peer.ts` | Peer address normalization (`normalizePeerUrl`, `peerHost`) |
 | `src/backend/gateway/authz/policy.ts` | PolicyEngine (rule evaluation) |
 | `src/backend/gateway/db/repository.ts` | SQLite repositories (servers, policy, health, activity) |
 | `src/backend/shared/protocol.ts` | Zod schemas for MCP + ServerConfig |

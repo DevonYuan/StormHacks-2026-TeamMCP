@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import Home from './pages/Home'
 import { useNetworkData } from './data/NetworkData'
+import { ConnectModal } from './components/ConnectModal'
+import { ExposeModal } from './components/ExposeModal'
 
 type Page = 'Network' | 'Machines' | 'Settings'
 
@@ -183,6 +185,40 @@ function StatusBar(): React.JSX.Element {
   )
 }
 
+function TopBar(): React.JSX.Element {
+  const [modal, setModal] = useState<'expose' | 'connect' | null>(null)
+  const { status, tailscale } = useNetworkData()
+  const running = status?.running ?? false
+  const exposed = running && tailscale.available && status?.boundAddress === tailscale.ip
+
+  return (
+    <>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <span className="text-xs text-muted">Share your local MCP servers with your team</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setModal('connect')}
+            className="rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs text-muted hover:text-ink"
+          >
+            Connect to a peer
+          </button>
+          <button
+            onClick={() => setModal('expose')}
+            className="flex items-center gap-1.5 rounded-lg bg-signal px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+          >
+            <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
+              <path d="M4.5 2.5v11L13 8z" />
+            </svg>
+            {running ? (exposed ? 'Open · exposed' : 'Open · local') : 'Open a connection'}
+          </button>
+        </div>
+      </div>
+      <ExposeModal open={modal === 'expose'} onClose={() => setModal(null)} />
+      <ConnectModal open={modal === 'connect'} onClose={() => setModal(null)} />
+    </>
+  )
+}
+
 function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('Network')
 
@@ -203,6 +239,7 @@ function App(): React.JSX.Element {
       <Sidebar page={page} onPage={setPage} />
       <main className="overflow-y-auto">
         <div className="mx-auto max-w-[1440px] px-6 py-6">
+          <TopBar />
           {page === 'Network' ? <Home /> : <p className="text-muted">{page} is coming next.</p>}
         </div>
       </main>

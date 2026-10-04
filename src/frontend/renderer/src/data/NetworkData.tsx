@@ -13,10 +13,12 @@ import type { PolicyDocument } from '@shared/policy'
 import type { ServerConfig } from '@shared/protocol'
 import type {
   ActivityEvent,
+  AddPeerResult,
   Device,
   GatewayMetrics,
   Host,
   Server,
+  ShareInfo,
   TailscaleInfo,
 } from '@shared/types'
 import {
@@ -75,6 +77,15 @@ export interface NetworkData {
   updatedAt: number
   startGateway: () => Promise<void>
   stopGateway: () => Promise<void>
+  /** Bind the tailnet interface (when available) and start the gateway so peers can connect. */
+  expose: () => Promise<void>
+  /** Canonical share info for the expose modal. */
+  getShare: () => Promise<ShareInfo>
+  /** Register a teammate's exposed gateway as a streamable-HTTP upstream. */
+  addPeer: (address: string) => Promise<AddPeerResult>
+  /** Validate a peer address without keeping it registered. */
+  probePeer: (address: string) => Promise<AddPeerResult>
+  removePeer: (id: string) => Promise<{ success: boolean }>
 }
 
 const NetworkDataContext = createContext<NetworkData | null>(null)
@@ -154,6 +165,29 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
       },
       stopGateway: async () => {
         await window.electronAPI?.gateway.stop()
+      },
+      expose: async () => {
+        await window.electronAPI?.gateway.expose()
+      },
+      getShare: async () => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to expose the gateway')
+        return api.share.get()
+      },
+      addPeer: async (address: string) => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to connect to a peer')
+        return api.peers.add(address, false)
+      },
+      probePeer: async (address: string) => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to test a peer')
+        return api.peers.add(address, true)
+      },
+      removePeer: async (id: string) => {
+        const api = window.electronAPI
+        if (!api) throw new Error('Open the desktop app to remove a peer')
+        return api.peers.remove(id)
       },
     }
   }, [snapshot, error])

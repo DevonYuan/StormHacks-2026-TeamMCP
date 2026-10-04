@@ -1,3 +1,5 @@
+import type { ServerConfig } from './protocol.js'
+
 export type DeviceStatus = 'online' | 'offline' | 'blocked'
 
 export interface HostStats {
@@ -81,4 +83,37 @@ export interface TailscaleInfo {
   ip: string | null
   hostname: string | null
   dnsName: string | null
+}
+
+/** Canonical "what to share" info for exposing this gateway (`/api/share`). */
+export interface ShareInfo {
+  running: boolean
+  /** `host:port` peers should connect to. */
+  address: string
+  /** Full Streamable-HTTP endpoint peers register. */
+  mcpUrl: string
+  bindAddress: string
+  port: number
+  /** True when bound to loopback only (not reachable by peers). */
+  localOnly: boolean
+  /** Active MCP sessions on this gateway. */
+  connectedPeers: number
+  /** Number of registered upstream servers. */
+  servers: number
+  tailscale: TailscaleInfo
+}
+
+/** A tool discovered on a peer gateway. */
+export interface PeerTool {
+  name: string
+  description?: string
+}
+
+/** Result of adding (or probing) a peer gateway (`POST /api/peers`). */
+export interface AddPeerResult {
+  success: boolean
+  probe?: boolean
+  url: string
+  tools: PeerTool[]
+  server?: ServerConfig
 }
