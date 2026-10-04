@@ -65,15 +65,20 @@ export function registerGatewayLifecycleIpcHandlers({
       )
     }
 
-    if (getGatewayProcess()) await stopGateway()
+    // Idempotent: if the gateway is already bound to this tailnet address, don't
+    // restart it — a needless stop/start drops live sessions and can race the port.
+    if (!(isGatewayRunning() && getGatewayConfig().bindAddr === tailnet.ip)) {
+      if (getGatewayProcess()) await stopGateway()
 
-    const config = GatewayConfigSchema.parse({
-      ...getGatewayConfig(),
-      bindAddr: tailnet.ip,
-    })
-    setGatewayConfig(config)
+      const config = GatewayConfigSchema.parse({
+        ...getGatewayConfig(),
+        bindAddr: tailnet.ip,
+      })
+      setGatewayConfig(config)
 
-    await startGateway()
-    return { success: true, bindAddr: config.bindAddr, tailnet }
+      await startGateway()
+    }
+
+    return { success: true, bindAddr: tailnet.ip, tailnet }
   })
 }

@@ -48,6 +48,8 @@ let mainWindow: BrowserWindow | null = null;
 let isGatewayRunning = false;
 // Shared handle for an in-flight start so concurrent callers can't race.
 let gatewayStartPromise: Promise<void> | null = null;
+// Guards the async quit sequence so `before-quit` runs its shutdown only once.
+let quitting = false;
 
 // Initialize configuration
 // Settings the renderer may change. Never bindAddr: exposing goes through gateway:expose.
@@ -275,7 +277,12 @@ function startGatewayProcess(): Promise<void> {
       }
     });
 
+    // Keep the tail of the child's stderr so a bind failure (e.g. EADDRINUSE)
+    // surfaces in the start error instead of just a generic timeout.
+    let stderrTail = "";
+
     child.stderr?.on("data", (data) => {
+      stderrTail = (stderrTail + data.toString()).slice(-600);
       logger.error({ gateway: true }, data.toString());
       mainWindow?.webContents.send(IPC_CHANNELS.GATEWAY_LOG, {
         timestamp: Date.now(),
@@ -315,7 +322,7 @@ function startGatewayProcess(): Promise<void> {
       if (!ready) {
         fail(
           new Error(
-            "Gateway failed to start within 10 seconds. Check the gateway logs for the bind error.",
+            `Gateway failed to start within 10 seconds.${stderrTail ? `\n${stderrTail.trim()}` : ""}`,
           ),
         );
       }
@@ -369,7 +376,7 @@ function startGatewayProcess(): Promise<void> {
           new Error(
             `Gateway exited before becoming ready (code ${code ?? "?"}${
               signal ? `, signal ${signal}` : ""
-            }). Check the gateway logs for the bind error.`,
+            }).${stderrTail ? `\n${stderrTail.trim()}` : ""}`,
           ),
         );
       }
@@ -382,21 +389,38 @@ function stopGateway(): Promise<void> {
   return new Promise((resolve) => {
     const proc = gatewayProcess;
     if (!proc) {
+      gatewayProcess = null;
+      isGatewayRunning = false;
       resolve();
       return;
     }
 
     logger.info("Stopping gateway process...");
 
-    const finish = (): void => resolve();
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      // Reset state here too: the child's own exit handler normally does this,
+      // but expose/restart paths must never see a stale "running" flag.
+      if (gatewayProcess === proc) {
+        gatewayProcess = null;
+        isGatewayRunning = false;
+        mainWindow?.webContents.send(
+          IPC_CHANNELS.GATEWAY_STATUS,
+          getGatewayStatus(),
+        );
+      }
+      resolve();
+    };
     proc.once("exit", finish);
     proc.once("error", finish);
     proc.kill("SIGTERM");
 
-    // Force kill after 5 seconds if it hasn't exited.
+    // Force kill after 3 seconds if it hasn't exited.
     setTimeout(() => {
-      if (gatewayProcess === proc) proc.kill("SIGKILL");
-    }, 5000);
+      if (!done) proc.kill("SIGKILL");
+    }, 3000);
   });
 }
 
@@ -533,10 +557,13 @@ function getLocalTailnet(): Promise<LocalTailnetInfo> {
             const ips: string[] = parsed?.Self?.TailscaleIPs ?? [];
             // The 100.x address is only bindable while the tunnel is actually up.
             const up = state === "Running" && ips.length > 0;
+            // Prefer the IPv4 tailnet address: it is what peers dial, and binding
+            // only to the IPv6 ULA would break their host:port URL.
+            const ipv4 = ips.find((addr) => /^\d{1,3}(\.\d{1,3}){3}$/.test(addr));
             resolve({
               available: up,
               state,
-              ip: up ? ips[0] : null,
+              ip: up ? (ipv4 ?? ips[0]) : null,
               hostname: parsed?.Self?.HostName ?? null,
               dnsName: parsed?.Self?.DNSName ?? null,
             });
@@ -641,8 +668,12 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  void stopGateway();
+app.on("before-quit", (event) => {
+  // Wait for the gateway child to exit so it can't be orphaned holding its port.
+  if (quitting || !gatewayProcess) return;
+  event.preventDefault();
+  quitting = true;
+  void stopGateway().finally(() => app.quit());
 });
 
 // Handle protocol links (for OAuth callbacks, etc.)

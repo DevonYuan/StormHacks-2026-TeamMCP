@@ -195,17 +195,33 @@ export class Gateway {
 
     logger.info('Shutting down gateway...')
 
-    if (this.services) {
-      await this.services.clientManager.disconnectAll()
-      await this.services.proxyServer.shutdown()
-      this.services.db.close()
+    // Never let a hung cleanup keep the process (and its listening port) alive —
+    // an orphaned gateway would block the next start with EADDRINUSE.
+    const bail = setTimeout(() => {
+      logger.warn('Gateway shutdown timed out — forcing exit')
+      process.exit(0)
+    }, 3000)
+    bail.unref()
+
+    try {
+      if (this.services) {
+        await this.services.clientManager.disconnectAll()
+        await this.services.proxyServer.shutdown()
+        this.services.db.close()
+      }
+
+      for (const server of [this.httpServer, this.loopbackServer]) {
+        if (!server) continue
+        // Force-close lingering (keep-alive / idle) connections so close() resolves.
+        server.closeIdleConnections()
+        server.closeAllConnections()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      }
+    } catch (error) {
+      logger.error({ error }, 'Error during shutdown')
     }
 
-    for (const server of [this.httpServer, this.loopbackServer]) {
-      if (!server) continue
-      await new Promise<void>((resolve) => server.close(() => resolve()))
-    }
-
+    clearTimeout(bail)
     logger.info('Gateway stopped')
     process.exit(0)
   }
