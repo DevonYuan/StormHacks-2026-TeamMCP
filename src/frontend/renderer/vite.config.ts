@@ -7,7 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
-      '@shared': path.resolve(__dirname, '../../shared'),
+      '@shared': path.resolve(__dirname, '../../backend/shared'),
     },
   },
   server: {
@@ -15,7 +15,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    outDir: '../../dist/renderer',
+    outDir: '../../../dist/frontend/renderer',
     emptyOutDir: true,
   },
 })

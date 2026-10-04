@@ -1,8 +1,8 @@
 // Integration test setup
 import { vi } from 'vitest'
-import { createDatabase, runMigrations, createRepositories } from '../../src/gateway/db/index.js'
-import type { SqliteDatabase } from '../../src/gateway/db/sqlite.js'
-import { GatewayConfig } from '../../src/shared/config.js'
+import { createDatabase, runMigrations, createRepositories } from '../../src/backend/gateway/db/index.js'
+import type { SqliteDatabase } from '../../src/backend/gateway/db/sqlite.js'
+import { GatewayConfig } from '../../src/backend/shared/config.js'
 
 // Use in-memory database for tests
 let testDb: SqliteDatabase
@@ -44,7 +44,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-vi.mock('../../src/gateway/auth/tailscale.js', () => ({
+vi.mock('../../src/backend/gateway/auth/tailscale.js', () => ({
   getTailscaleStatus: vi.fn().mockResolvedValue({
     Self: { TailscaleIPs: ['100.1.2.3'], HostName: 'test-host', DNSName: 'test-host.tailnet.ts.net' },
   }),

@@ -13,9 +13,9 @@ const nodeExternals = [
 
 export default defineConfig({
   build: {
-    outDir: path.resolve(root, 'dist/gateway'),
+    outDir: path.resolve(root, 'dist/backend/gateway'),
     lib: {
-      entry: path.resolve(root, 'src/gateway/index.ts'),
+      entry: path.resolve(root, 'src/backend/gateway/index.ts'),
       formats: ['cjs'],
       fileName: 'index',
     },
@@ -33,8 +33,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(root, 'src'),
-      '@shared': path.resolve(root, 'src/shared'),
-      '@gateway': path.resolve(root, 'src/gateway'),
+      '@shared': path.resolve(root, 'src/backend/shared'),
+      '@gateway': path.resolve(root, 'src/backend/gateway'),
     },
   },
 })

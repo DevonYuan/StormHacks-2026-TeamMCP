@@ -4,7 +4,7 @@ import type { Config } from "tailwindcss";
  * Design tokens — single source of truth
  * --------------------------------------------------------------------------
  * The literal values (colours, font stacks, radius) live as CSS variables in
- * `src/renderer/src/styles/globals.css`, with a light and a dark theme.
+ * `src/frontend/renderer/src/styles/globals.css`, with a light and a dark theme.
  *
  * This file only maps those variables to *named* utility classes
  * (e.g. `bg-status-blocked`, `text-brand`, `text-h1`). Colours are wired as
@@ -15,7 +15,7 @@ import type { Config } from "tailwindcss";
  * and the class here first, then PR it. Never hardcode a hex/rgb.
  */
 const config: Config = {
-  content: ["./src/renderer/index.html", "./src/renderer/src/**/*.{ts,tsx}"],
+  content: ["./src/frontend/renderer/index.html", "./src/frontend/renderer/src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {

@@ -126,14 +126,28 @@ export class MCPProxyServer {
           arguments: request.params.arguments as Record<string, unknown> | undefined,
         })
 
+        // A tool can report failure via `isError` instead of throwing (MCP semantics);
+        // reflect that in the activity log rather than recording it as a success.
+        const toolFailed = result.isError === true
+        const toolErrorText = toolFailed
+          ? (result.content ?? [])
+              .map((c) => (c.type === 'text' && typeof c.text === 'string' ? c.text : ''))
+              .filter(Boolean)
+              .join(' ')
+              .slice(0, 500)
+          : ''
+
         await this.logActivity({
           identity: authContext.identity,
           method: 'tools/call',
           serverId,
           toolName,
           requestSummary: `${request.params.name}(${JSON.stringify(request.params.arguments)})`,
-          responseSummary: `OK (${JSON.stringify(result).length} chars)`,
-          success: true,
+          responseSummary: toolFailed
+            ? `ERROR: ${toolErrorText || 'tool reported an error'}`
+            : `OK (${JSON.stringify(result).length} chars)`,
+          success: !toolFailed,
+          errorMessage: toolFailed ? toolErrorText || undefined : undefined,
           durationMs: Date.now() - startTime,
         })
 

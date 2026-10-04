@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { PolicyEngine, createDefaultPolicy, validatePolicy } from '../../src/gateway/authz/policy.js'
-import { PolicyDocument, PolicyRule, Identity } from '../../src/shared/policy.js'
+import { PolicyEngine, createDefaultPolicy, validatePolicy } from '../../src/backend/gateway/authz/policy.js'
+import { PolicyDocument, PolicyRule, Identity } from '../../src/backend/shared/policy.js'
 
 const testIdentity: Identity = {
   user: 'alice@example.com',

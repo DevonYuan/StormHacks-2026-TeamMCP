@@ -245,11 +245,13 @@ Then run `npm run rebuild` (wraps `@electron/rebuild`). Skipping this is the mos
 ```text
 .
 ├── src/
-│   ├── main/           Electron main process — supervisor, IPC, gateway supervision
-│   ├── preload/        contextBridge surface exposed to the renderer
-│   ├── renderer/       React dashboard (Vite)
-│   ├── gateway/        Gateway process — its own entry point and bundle
-│   └── shared/         Types + Zod schemas (protocol, policy, config)
+│   ├── backend/        Node/Electron processes — no UI
+│   │   ├── main/       Electron main process — supervisor, IPC, gateway supervision
+│   │   ├── gateway/    Gateway process — its own entry point and bundle
+│   │   └── shared/     Types + Zod schemas (protocol, policy, config)
+│   └── frontend/       Everything that renders the UI
+│       ├── preload/    contextBridge surface exposed to the renderer
+│       └── renderer/   React dashboard (Vite)
 ├── config/             Tooling config (electron-vite, Vite, Vitest, Playwright, ESLint, tsconfigs)
 ├── test/
 │   ├── fixtures/       Throwaway MCP servers used by tests
@@ -257,7 +259,7 @@ Then run `npm run rebuild` (wraps `@electron/rebuild`). Skipping this is the mos
 └── .env.example
 ```
 
-`src/gateway/` builds to a separate bundle that Electron launches as a child process, so it can be run and tested standalone without the UI.
+`src/backend/gateway/` builds to a separate bundle that Electron launches as a child process, so it can be run and tested standalone without the UI.
 
 ### First run
 

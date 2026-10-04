@@ -16,11 +16,11 @@
     "baseUrl": "..",
     "paths": {
       "@/*": ["src/*"],
-      "@shared/*": ["src/shared/*"],
-      "@gateway/*": ["src/gateway/*"],
-      "@main/*": ["src/main/*"],
-      "@preload/*": ["src/preload/*"],
-      "@renderer/*": ["src/renderer/*"]
+      "@shared/*": ["src/backend/shared/*"],
+      "@gateway/*": ["src/backend/gateway/*"],
+      "@main/*": ["src/backend/main/*"],
+      "@preload/*": ["src/frontend/preload/*"],
+      "@renderer/*": ["src/frontend/renderer/*"]
     }
   },
   "exclude": ["../node_modules", "../dist"]

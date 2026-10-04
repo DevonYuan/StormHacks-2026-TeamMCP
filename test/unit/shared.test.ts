@@ -4,9 +4,9 @@ import {
   parseNamespacedTool,
   ServerConfigSchema,
   TransportType,
-} from '../../src/shared/protocol.js'
-import { GatewayConfigSchema, loadConfigFromEnv, mergeConfig, DEFAULT_GATEWAY_CONFIG } from '../../src/shared/config.js'
-import { PolicyDocumentSchema, PolicyRuleSchema, IdentitySchema } from '../../src/shared/policy.js'
+} from '../../src/backend/shared/protocol.js'
+import { GatewayConfigSchema, loadConfigFromEnv, mergeConfig, DEFAULT_GATEWAY_CONFIG } from '../../src/backend/shared/config.js'
+import { PolicyDocumentSchema, PolicyRuleSchema, IdentitySchema } from '../../src/backend/shared/policy.js'
 
 describe('Protocol utilities', () => {
   describe('namespaceTool', () => {

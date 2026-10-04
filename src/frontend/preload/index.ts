@@ -16,8 +16,8 @@ import type {
   ServerHealth,
   GatewayStatus,
   GatewayConfig,
-} from '../shared/index.js'
-import type { HostStats } from '../shared/types.js'
+} from '../../backend/shared/index.js'
+import type { HostStats } from '../../backend/shared/types.js'
 
 // Type-safe IPC channel definitions
 type IpcChannels =

@@ -9,9 +9,9 @@ const root = path.resolve(__dirname, '..')
 export default defineConfig({
   main: {
     build: {
-      outDir: path.resolve(root, 'dist/main'),
+      outDir: path.resolve(root, 'dist/backend/main'),
       lib: {
-        entry: path.resolve(root, 'src/main/index.ts'),
+        entry: path.resolve(root, 'src/backend/main/index.ts'),
         formats: ['cjs'],
         fileName: 'index',
       },
@@ -22,24 +22,29 @@ export default defineConfig({
   },
   preload: {
     build: {
-      outDir: path.resolve(root, 'dist/preload'),
+      outDir: path.resolve(root, 'dist/frontend/preload'),
       lib: {
-        entry: path.resolve(root, 'src/preload/index.ts'),
+        entry: path.resolve(root, 'src/frontend/preload/index.ts'),
         formats: ['cjs'],
         fileName: 'index',
       },
     },
   },
   renderer: {
-    root: path.resolve(root, 'src/renderer'),
+    root: path.resolve(root, 'src/frontend/renderer'),
     build: {
-      outDir: path.resolve(root, 'dist/renderer'),
+      outDir: path.resolve(root, 'dist/frontend/renderer'),
+      // electron-vite's default entry lookup assumes <root>/src/renderer/index.html,
+      // so point it at the relocated renderer explicitly.
+      rollupOptions: {
+        input: path.resolve(root, 'src/frontend/renderer/index.html'),
+      },
     },
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(root, 'src/renderer'),
-        '@shared': path.resolve(root, 'src/shared'),
+        '@': path.resolve(root, 'src/frontend/renderer'),
+        '@shared': path.resolve(root, 'src/backend/shared'),
       },
     },
     server: {

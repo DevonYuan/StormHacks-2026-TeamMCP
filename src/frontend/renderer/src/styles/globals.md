@@ -1,6 +1,6 @@
 # Global stylesheet
 
-Source of truth: [`globals.css`](./globals.css), imported from `src/renderer/src/main.tsx`.
+Source of truth: [`globals.css`](./globals.css), imported from `src/frontend/renderer/src/main.tsx`.
 
 Named Tailwind classes that consume those tokens live in [`tailwind.config.ts`](../../../../tailwind.config.ts). The CSS file stores the values. The Tailwind config only names them (`bg-brand`, `text-ink-muted`, `text-h1`).
 
