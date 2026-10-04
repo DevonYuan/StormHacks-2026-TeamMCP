@@ -14,6 +14,7 @@ import {
   toGatewayMetrics,
   toHost,
   toMachines,
+  blockRuleId,
   toServers,
 } from '../../src/frontend/renderer/src/data/adapters.js'
 
@@ -331,7 +332,7 @@ describe('adapters', () => {
             user: 'devon@tailnet',
             self: true,
           }),
-          devices: [tDevice()],
+          devices: [tDevice({ gatewayUp: true })],
         }),
         status,
         [],
@@ -349,6 +350,41 @@ describe('adapters', () => {
       expect(peer.ip).toBe('100.64.0.5')
       expect(peer.subtitle).toBe('alice@tailnet · tailnet')
       expect(peer.status).toBe('connected')
+      expect(peer.mcpUrl).toBe('http://100.64.0.5:8788/mcp')
+    })
+
+    const peerStatus = (
+      device: Partial<TailnetDevice>,
+      entries: ActivityEntry[] = [],
+      doc: PolicyDocument = allowAll
+    ) =>
+      toMachines(tailnet({ devices: [tDevice(device)] }), status, entries, doc, ['s1'], now).find(
+        (m) => m.id === 'tailnet:node-1'
+      )!
+
+    it('is offline when Tailscale is up but there is no gateway and no session', () => {
+      expect(peerStatus({ online: true }).status).toBe('offline')
+      expect(peerStatus({ online: true, gatewayUp: false, sessions: 0 }).status).toBe('offline')
+    })
+
+    it('is connected while their gateway answers or they hold a session on ours', () => {
+      expect(peerStatus({ gatewayUp: true }).status).toBe('connected')
+      expect(peerStatus({ sessions: 1 }).status).toBe('connected')
+    })
+
+    it('ignores recent activity once a tailnet peer stops', () => {
+      const recent = mkEntry({ timestamp: now - 1_000, identity: { ...ALICE, deviceId: 'node-1' } })
+      expect(peerStatus({ online: false, gatewayUp: true }, [recent]).status).toBe('offline')
+    })
+
+    it('marks a blocked device denied, and clears it after unblock', () => {
+      const blockRule = rule({ id: blockRuleId('node-1'), effect: 'deny', priority: 1000, identities: [{ user: '', device: '', deviceId: 'node-1', tailnet: '' }] })
+      const blocked = peerStatus({ gatewayUp: true }, [], policy([blockRule, rule({ id: 'allow-all' })], 'allow'))
+      expect(blocked).toMatchObject({ status: 'denied', blocked: true })
+
+      const denied = mkEntry({ timestamp: now - 5_000, errorCode: 403, success: false, identity: { ...ALICE, deviceId: 'node-1' } })
+      const unblocked = { ...allowAll, updatedAt: now - 1_000 }
+      expect(peerStatus({ gatewayUp: true }, [denied], unblocked)).toMatchObject({ status: 'connected', blocked: false })
     })
 
     it('marks a peer denied when the policy grants no servers', () => {

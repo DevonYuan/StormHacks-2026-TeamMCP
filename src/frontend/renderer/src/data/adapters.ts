@@ -232,18 +232,31 @@ function parseLastSeen(value: string | null): number {
   return Number.isFinite(ts) && ts > 0 ? ts : 0
 }
 
+/** Policy rule id used by the Machines page Block / Unblock action. */
+export function blockRuleId(deviceId: string): string {
+  return `block:${deviceId}`
+}
+
+/**
+ * `online` is a live signal when known (tailnet nodes); `null` falls back to
+ * recent activity (identities seen only in the log).
+ */
 function machineStatus(
   identity: Identity,
   entry: ActivityEntry | undefined,
-  online: boolean,
+  online: boolean | null,
   policy: PolicyDocument,
   allServerIds: string[],
   now: number
 ): MachineStatus {
-  if (entry?.errorCode === 403) return 'denied'
+  // A denial from before the last policy change (e.g. Unblock) no longer applies.
+  if (entry?.errorCode === 403 && entry.timestamp >= policy.updatedAt) return 'denied'
+  if (identity.deviceId && policy.rules.some((r) => r.id === blockRuleId(identity.deviceId))) {
+    return 'denied'
+  }
   const allowed = accessibleServers(policy, identity, allServerIds)
   if (allServerIds.length > 0 && allowed.length === 0) return 'denied'
-  if (online) return 'connected'
+  if (online !== null) return online ? 'connected' : 'offline'
   if (entry && now - entry.timestamp <= ONLINE_WINDOW_MS) return 'connected'
   return 'offline'
 }
@@ -280,7 +293,12 @@ export function toMachines(
       if (key) claimed.add(key)
     }
 
-    const online = node.self ? Boolean(status?.running) : node.online
+    // A peer counts as connected only while Tailscale sees it AND either its own
+    // gateway answers /health or it holds an open session on ours.
+    const online = node.self
+      ? Boolean(status?.running)
+      : node.online && (Boolean(node.gatewayUp) || (node.sessions ?? 0) > 0)
+    const ip = node.ips[0]
     const gatewayId =
       node.self && status ? `${status.boundAddress}:${status.port}` : node.stableId ?? node.id ?? ''
     const tailnetName = node.user?.split('@')[1]
@@ -289,11 +307,16 @@ export function toMachines(
       id: `tailnet:${node.id}`,
       name: node.hostname,
       subtitle: [node.user, tailnetName].filter(Boolean).join(' · ') || 'Peer',
-      ip: node.ips[0] ?? (node.self ? status?.boundAddress ?? '—' : '—'),
+      ip: ip ?? (node.self ? status?.boundAddress ?? '—' : '—'),
       gatewayId: gatewayId || '—',
       status: machineStatus(identity, entry, online, policy, allServerIds, now),
       badge: node.self ? 'Local' : node.tags[0] ?? 'Peer',
       lastSeenMs: entry?.timestamp ?? parseLastSeen(node.lastSeen),
+      deviceId: node.id,
+      self: node.self,
+      mcpUrl: ip ? `http://${ip.includes(':') ? `[${ip}]` : ip}:${status?.port ?? 8788}/mcp` : null,
+      blocked: policy.rules.some((r) => r.id === blockRuleId(node.id)),
+      sessions: node.sessions ?? 0,
     })
   }
 
@@ -308,6 +331,11 @@ export function toMachines(
       status: 'connected',
       badge: 'Local',
       lastSeenMs: 0,
+      deviceId: '',
+      self: true,
+      mcpUrl: `http://${status.boundAddress}:${status.port}/mcp`,
+      blocked: false,
+      sessions: 0,
     })
   }
 
@@ -327,9 +355,14 @@ export function toMachines(
       subtitle: [identity.user, identity.tailnet].filter(Boolean).join(' · ') || 'Peer',
       ip: '—',
       gatewayId: identity.deviceId || '—',
-      status: machineStatus(identity, entry, false, policy, allServerIds, now),
+      status: machineStatus(identity, entry, null, policy, allServerIds, now),
       badge: isLocal ? 'Local' : 'Peer',
       lastSeenMs: entry.timestamp,
+      deviceId: identity.deviceId,
+      self: isLocal,
+      mcpUrl: null,
+      blocked: policy.rules.some((r) => r.id === blockRuleId(identity.deviceId)),
+      sessions: 0,
     })
   }
 

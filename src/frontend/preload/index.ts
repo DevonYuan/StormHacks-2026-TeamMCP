@@ -55,6 +55,7 @@ type IpcChannels =
   | 'share:get'
   | 'peers:add'
   | 'peers:remove'
+  | 'sessions:disconnect'
 
 // Helper for typed invoke
 function invoke<Args extends unknown[], Return>(channel: IpcChannels, ...args: Args): Promise<Return> {
@@ -143,6 +144,10 @@ const api = {
     add: (address: string, probe = false) =>
       invoke<[string, boolean], AddPeerResult>('peers:add', address, probe),
     remove: (id: string) => invoke<[string], { success: boolean }>('peers:remove', id),
+  },
+  sessions: {
+    disconnect: (deviceId: string) =>
+      invoke<[string], { success: boolean; closed: number }>('sessions:disconnect', deviceId),
   },
 
   // Health monitoring

@@ -170,7 +170,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
           <button
             onClick={() => void (running ? stopGateway() : startGateway())}
             aria-label={running ? 'Pause gateway' : 'Start gateway'}
-            className="ml-auto rounded-md p-1 text-ink hover:bg-surface-muted hover:text-ink-emphasis"
+            className={`ml-auto rounded-md p-1 ${running ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600' : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'}`}
           >
             <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
               {running ? (

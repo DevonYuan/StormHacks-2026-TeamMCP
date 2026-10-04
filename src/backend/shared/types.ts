@@ -73,6 +73,16 @@ export interface Machine {
   badge: string
   /** Last activity / LastSeen in ms, 0 when unknown. */
   lastSeenMs: number
+  /** Tailscale node id ('' when unknown); target of block / disconnect. */
+  deviceId: string
+  /** This machine. */
+  self: boolean
+  /** `http://<tailnet-ip>:<port>/mcp`, assuming peers use our port; null without an IP. */
+  mcpUrl: string | null
+  /** A Block rule from the Machines page targets this device. */
+  blocked: boolean
+  /** Open MCP sessions on our gateway. */
+  sessions: number
 }
 
 export interface ActivityEvent {
@@ -119,6 +129,10 @@ export interface TailnetDevice {
   user: string | null
   /** True for this machine (Tailscale `Self`). */
   self: boolean
+  /** Peers only: open MCP sessions this device has on our gateway. */
+  sessions?: number
+  /** Peers only: their gateway answered `/health` on its tailnet IP. */
+  gatewayUp?: boolean
 }
 
 /** Response for `GET /api/tailscale/devices` (also `tailscale:devices` IPC). */

@@ -96,6 +96,7 @@ const IPC_CHANNELS = {
   SHARE_GET: "share:get",
   PEERS_ADD: "peers:add",
   PEERS_REMOVE: "peers:remove",
+  SESSIONS_DISCONNECT: "sessions:disconnect",
 
   // Real-time events (main -> renderer)
   EVENT_ACTIVITY: "event:activity",
@@ -847,6 +848,16 @@ function setupIpcHandlers(): void {
       method: "DELETE",
     });
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SESSIONS_DISCONNECT,
+    async (_event, deviceId: string) => {
+      return gatewayFetch<{ success: boolean; closed: number }>(
+        `/api/sessions/${encodeURIComponent(deviceId)}`,
+        { method: "DELETE" },
+      );
+    },
+  );
 
   // External links
   ipcMain.on("shell:openExternal", (_event, url: string) => {
