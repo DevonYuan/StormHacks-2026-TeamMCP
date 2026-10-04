@@ -24,16 +24,14 @@ import {
   AppConfig,
   DEFAULT_APP_CONFIG,
 } from "../shared/config.js";
-import { ServerConfig } from "../shared/protocol.js";
-import { PolicyDocument, PolicyRule } from "../shared/policy.js";
-import {
-  ActivityQuery,
-  ActivityEntry,
-  ActivityStats,
-  ServerHealth,
-  GatewayStatus,
-} from "../shared/activity.js";
-import type { AddPeerResult, HostStats, ShareInfo, TailnetDevicesResponse } from "../shared/types.js";
+import { GatewayStatus } from "../shared/activity.js";
+import { IPC_CHANNELS } from "../shared/ipc.js";
+import { registerServerIpcHandlers } from "./ipc/servers.js";
+import { registerPolicyActivityIpcHandlers } from "./ipc/policy-activity.js";
+import { registerGatewayLifecycleIpcHandlers } from "./ipc/gateway-lifecycle.js";
+import { registerSystemIpcHandlers } from "./ipc/system.js";
+import { registerNetworkIpcHandlers } from "./ipc/network.js";
+import type { HostStats } from "../shared/types.js";
 import pino from "pino";
 
 const logger = pino({ name: "main" });
@@ -50,75 +48,23 @@ let isGatewayRunning = false;
 // Shared handle for an in-flight start so concurrent callers can't race.
 let gatewayStartPromise: Promise<void> | null = null;
 
-// IPC channel names
-const IPC_CHANNELS = {
-  // Gateway control
-  GATEWAY_START: "gateway:start",
-  GATEWAY_STOP: "gateway:stop",
-  GATEWAY_STATUS: "gateway:status",
-  GATEWAY_LOG: "gateway:log",
-  GATEWAY_EXPOSE: "gateway:expose",
-
-  // Server management
-  SERVERS_GET: "servers:get",
-  SERVERS_CREATE: "servers:create",
-  SERVERS_UPDATE: "servers:update",
-  SERVERS_DELETE: "servers:delete",
-  SERVERS_CONNECT: "servers:connect",
-  SERVERS_DISCONNECT: "servers:disconnect",
-  SERVERS_REFRESH: "servers:refresh",
-
-  // Policy management
-  POLICY_GET: "policy:get",
-  POLICY_UPDATE: "policy:update",
-  POLICY_ADD_RULE: "policy:addRule",
-  POLICY_REMOVE_RULE: "policy:removeRule",
-
-  // Activity log
-  ACTIVITY_QUERY: "activity:query",
-  ACTIVITY_STATS: "activity:stats",
-  ACTIVITY_PRUNE: "activity:prune",
-
-  // Health
-  HEALTH_GET: "health:get",
-  HOST_STATS: "host:stats",
-
-  // Config
-  CONFIG_GET: "config:get",
-  CONFIG_UPDATE: "config:update",
-
-  // Tailscale
-  TAILSCALE_STATUS: "tailscale:status",
-  TAILSCALE_WHOIS: "tailscale:whois",
-  TAILSCALE_DEVICES: "tailscale:devices",
-
-  // Share / peers
-  SHARE_GET: "share:get",
-  PEERS_ADD: "peers:add",
-  PEERS_REMOVE: "peers:remove",
-  SESSIONS_DISCONNECT: "sessions:disconnect",
-
-  // Real-time events (main -> renderer)
-  EVENT_ACTIVITY: "event:activity",
-  EVENT_SERVER_HEALTH: "event:serverHealth",
-  EVENT_GATEWAY_STATUS: "event:gatewayStatus",
-  EVENT_TOOLS_CHANGED: "event:toolsChanged",
-} as const;
-
 // Initialize configuration
 // Settings the renderer may change. Never bindAddr: exposing goes through gateway:expose.
 const USER_SETTINGS = ["port", "redactToolPayloads", "logLevel"] as const;
 
+/** Keep only settings that the renderer is allowed to modify. */
 function pickUserSettings(source: Partial<GatewayConfig>): Partial<GatewayConfig> {
   return Object.fromEntries(
     USER_SETTINGS.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]),
   ) as Partial<GatewayConfig>;
 }
 
+/** Resolve the persisted settings file under Electron's user-data directory. */
 function settingsPath(): string {
   return join(app.getPath("userData"), "settings.json");
 }
 
+/** Load supported persisted settings, falling back to defaults when unavailable. */
 function loadUserSettings(): Partial<GatewayConfig> {
   try {
     return pickUserSettings(JSON.parse(readFileSync(settingsPath(), "utf8")));
@@ -127,6 +73,7 @@ function loadUserSettings(): Partial<GatewayConfig> {
   }
 }
 
+/** Merge defaults, persisted preferences, and environment configuration. */
 function initializeConfig(): void {
   const envConfig = loadConfigFromEnv();
   gatewayConfig = mergeConfig(DEFAULT_GATEWAY_CONFIG, loadUserSettings(), envConfig);
@@ -134,7 +81,7 @@ function initializeConfig(): void {
   logger.info({ gatewayConfig }, "Configuration loaded");
 }
 
-// Create main window
+/** Create the isolated Electron window and load the renderer application. */
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -197,6 +144,7 @@ function startGateway(): Promise<void> {
   return gatewayStartPromise;
 }
 
+/** Spawn the standalone gateway and resolve after its HTTP API is ready. */
 function startGatewayProcess(): Promise<void> {
   return new Promise((resolve, reject) => {
     // A handle left over from a previous failed attempt is dead to us.
@@ -380,6 +328,7 @@ function startGatewayProcess(): Promise<void> {
   });
 }
 
+/** Gracefully stop the child gateway process, forcing termination after a timeout. */
 function stopGateway(): Promise<void> {
   return new Promise((resolve) => {
     const proc = gatewayProcess;
@@ -402,6 +351,7 @@ function stopGateway(): Promise<void> {
   });
 }
 
+/** Return the main process's local view of gateway status. */
 function getGatewayStatus(): GatewayStatus {
   return {
     running: isGatewayRunning,
@@ -415,13 +365,12 @@ function getGatewayStatus(): GatewayStatus {
   };
 }
 
-// HTTP helpers for talking to the gateway control API.
-// The gateway always serves this on loopback too - even when the data plane is
-// bound to the tailnet interface - so control fetches never depend on the bind.
+/** Build the loopback URL used for main-process control requests. */
 function gatewayBaseUrl(): string {
   return `http://127.0.0.1:${gatewayConfig.port}`;
 }
 
+/** Fetch a typed response from the gateway's local control API. */
 async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${gatewayBaseUrl()}${path}`, {
     ...init,
@@ -441,20 +390,6 @@ async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
-
-const EMPTY_ACTIVITY_STATS: ActivityStats = {
-  totalRequests: 0,
-  successfulRequests: 0,
-  failedRequests: 0,
-  uniqueUsers: 0,
-  uniqueServers: 0,
-  avgDurationMs: 0,
-  byMethod: {},
-  byServer: {},
-  byTool: {},
-  byIdentity: {},
-  errorsByCode: {},
-};
 
 /** Start the local gateway on demand (for flows that need a running proxy). */
 async function ensureGatewayRunning(): Promise<void> {
@@ -478,6 +413,7 @@ async function gatewayFetchOr<T>(
 
 // CPU % is the busy share of all core time since the previous call.
 let prevCpus = cpus();
+/** Read CPU and memory statistics, computing CPU usage since the previous call. */
 function hostStats(): HostStats {
   const now = cpus();
   let busy = 0;
@@ -565,294 +501,64 @@ function getLocalTailnet(): Promise<LocalTailnetInfo> {
   return attempt(0);
 }
 
-// IPC Handlers
-function setupIpcHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.HOST_STATS, hostStats);
-
-  // Gateway control
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_START, async () => {
-    await startGateway();
-    return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_STOP, async () => {
+/** Persist allowed gateway settings and restart the running child to apply them. */
+async function updateGatewaySettings(
+  updates: Partial<GatewayConfig>,
+): Promise<GatewayConfig> {
+  const allowed = pickUserSettings(updates);
+  gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, ...allowed });
+  appConfig = { ...appConfig, gateway: gatewayConfig };
+  writeFileSync(
+    settingsPath(),
+    JSON.stringify({ ...loadUserSettings(), ...allowed }, null, 2),
+  );
+  if (gatewayProcess) {
     await stopGateway();
-    return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_STATUS, async () => {
-    if (!isGatewayRunning) return getGatewayStatus();
-    try {
-      const status = await gatewayFetch<GatewayStatus>("/api/status");
-      return status;
-    } catch {
-      return getGatewayStatus();
-    }
-  });
-
-  // Expose = bind the tailnet interface (when available) and (re)start the gateway.
-  ipcMain.handle(IPC_CHANNELS.GATEWAY_EXPOSE, async () => {
-    const tailnet = await getLocalTailnet();
-
-    // Refuse before touching the running gateway so a misconfigured Tailscale
-    // doesn't leave the user with no gateway at all.
-    if (!tailnet.available || !tailnet.ip) {
-      throw new Error(
-        `Tailscale is not connected (state: ${tailnet.state ?? "unavailable"}). ` +
-          `Connect Tailscale, then try again.`,
-      );
-    }
-
-    // A running gateway keeps its old bind address, so restart to rebind.
-    if (gatewayProcess) await stopGateway();
-
-    gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, bindAddr: tailnet.ip });
-    appConfig = { ...appConfig, gateway: gatewayConfig };
-
     await startGateway();
-    return { success: true, bindAddr: gatewayConfig.bindAddr, tailnet };
-  });
+  }
+  return gatewayConfig;
+}
 
-  // Server management (proxied to the gateway control API)
-  ipcMain.handle(IPC_CHANNELS.SERVERS_GET, async () => {
-    // null (not []) means "gateway unreachable" so the UI can tell an empty
-    // list from a failed read and keep showing the last good one.
-    return gatewayFetchOr<ServerConfig[] | null>("/api/servers", null);
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.SERVERS_CREATE,
-    async (
-      _event,
-      server: Omit<ServerConfig, "id" | "createdAt" | "updatedAt">,
-    ) => {
-      await ensureGatewayRunning();
-      const created = await gatewayFetch<ServerConfig>("/api/servers", {
-        method: "POST",
-        body: JSON.stringify(server),
-      });
-      return { success: true, server: created };
+// IPC Handlers
+/** Wire the IPC domain modules and the remaining main-process handlers. */
+function setupIpcHandlers(): void {
+  registerGatewayLifecycleIpcHandlers({
+    startGateway,
+    stopGateway,
+    getGatewayStatus,
+    gatewayFetch,
+    isGatewayRunning: () => isGatewayRunning,
+    getGatewayProcess: () => gatewayProcess,
+    getGatewayConfig: () => gatewayConfig,
+    setGatewayConfig: (config) => {
+      gatewayConfig = config;
+      appConfig = { ...appConfig, gateway: config };
     },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.SERVERS_UPDATE,
-    async (_event, id: string, updates: Partial<ServerConfig>) => {
-      await ensureGatewayRunning();
-      const updated = await gatewayFetch<ServerConfig>(`/api/servers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(updates),
-      });
-      return { success: true, server: updated };
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.SERVERS_DELETE, async (_event, id: string) => {
-    await ensureGatewayRunning();
-    return gatewayFetch<{ success: boolean }>(`/api/servers/${id}`, {
-      method: "DELETE",
-    });
+    getLocalTailnet,
   });
 
-  ipcMain.handle(IPC_CHANNELS.SERVERS_CONNECT, async (_event, id: string) => {
-    await ensureGatewayRunning();
-    return gatewayFetch<{ success: boolean }>(`/api/servers/${id}/connect`, {
-      method: "POST",
-    });
+  registerServerIpcHandlers({
+    gatewayFetch,
+    gatewayFetchOr,
+    ensureGatewayRunning,
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.SERVERS_DISCONNECT,
-    async (_event, id: string) => {
-      await ensureGatewayRunning();
-      return gatewayFetch<{ success: boolean }>(
-        `/api/servers/${id}/disconnect`,
-        { method: "POST" },
-      );
-    },
-  );
+  registerPolicyActivityIpcHandlers({ gatewayFetch, gatewayFetchOr, ensureGatewayRunning });
 
-  ipcMain.handle(IPC_CHANNELS.SERVERS_REFRESH, async (_event, id: string) => {
-    await ensureGatewayRunning();
-    return gatewayFetch<{ success: boolean }>(`/api/servers/${id}/refresh`, {
-      method: "POST",
-    });
+  registerSystemIpcHandlers({
+    hostStats,
+    gatewayFetchOr,
+    getGatewayConfig: () => gatewayConfig,
+    updateGatewaySettings,
   });
 
-  // Policy management
-  ipcMain.handle(IPC_CHANNELS.POLICY_GET, async () => {
-    // null means "gateway unreachable". The UI keeps its last good policy
-    // instead of editing an empty one (which would wipe the bootstrap rules).
-    return gatewayFetchOr<PolicyDocument | null>("/api/policy", null);
+  registerNetworkIpcHandlers({
+    gatewayFetch,
+    ensureGatewayRunning,
+    isGatewayRunning: () => isGatewayRunning,
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.POLICY_UPDATE,
-    async (_event, policy: PolicyDocument) => {
-      await ensureGatewayRunning();
-      return gatewayFetch<{ success: boolean; policy: PolicyDocument }>(
-        "/api/policy",
-        {
-          method: "PUT",
-          body: JSON.stringify(policy),
-        },
-      );
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.POLICY_ADD_RULE,
-    async (_event, rule: PolicyRule) => {
-      await ensureGatewayRunning();
-      // Server-side append: one atomic write instead of GET-then-PUT, which
-      // could drop a concurrent rule change.
-      await gatewayFetch("/api/policy/rules", {
-        method: "POST",
-        body: JSON.stringify(rule),
-      });
-      return { success: true };
-    },
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.POLICY_REMOVE_RULE,
-    async (_event, ruleId: string) => {
-      await ensureGatewayRunning();
-      await gatewayFetch(`/api/policy/rules/${encodeURIComponent(ruleId)}`, {
-        method: "DELETE",
-      });
-      return { success: true };
-    },
-  );
-
-  // Activity log
-  ipcMain.handle(
-    IPC_CHANNELS.ACTIVITY_QUERY,
-    async (_event, query: ActivityQuery) => {
-      const params = new URLSearchParams();
-      for (const [key, value] of Object.entries(query)) {
-        if (value !== undefined && value !== null && value !== "") {
-          params.set(key, String(value));
-        }
-      }
-      return gatewayFetchOr<ActivityEntry[]>(
-        `/api/activity?${params.toString()}`,
-        [],
-      );
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.ACTIVITY_STATS, async () => {
-    return gatewayFetchOr<ActivityStats>(
-      "/api/activity/stats",
-      EMPTY_ACTIVITY_STATS,
-    );
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.ACTIVITY_PRUNE,
-    async (_event, olderThanMs: number) => {
-      await ensureGatewayRunning();
-      return gatewayFetch<{ success: boolean; count: number }>(
-        "/api/activity/prune",
-        {
-          method: "POST",
-          body: JSON.stringify({ olderThanMs }),
-        },
-      );
-    },
-  );
-
-  // Health
-  ipcMain.handle(IPC_CHANNELS.HEALTH_GET, async () => {
-    return gatewayFetchOr<ServerHealth[]>("/api/health", []);
-  });
-
-  // Config
-  ipcMain.handle(IPC_CHANNELS.CONFIG_GET, async () => {
-    return { gateway: gatewayConfig };
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.CONFIG_UPDATE,
-    async (_event, updates: Partial<GatewayConfig>) => {
-      const allowed = pickUserSettings(updates);
-      gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, ...allowed });
-      appConfig = { ...appConfig, gateway: gatewayConfig };
-      writeFileSync(
-        settingsPath(),
-        JSON.stringify({ ...loadUserSettings(), ...allowed }, null, 2),
-      );
-      // The gateway reads its config at spawn, so restart it to apply.
-      if (gatewayProcess) {
-        await stopGateway();
-        await startGateway();
-      }
-      return { success: true, gateway: gatewayConfig };
-    },
-  );
-
-  // Tailscale
-  ipcMain.handle(IPC_CHANNELS.TAILSCALE_STATUS, async () => {
-    if (!isGatewayRunning) {
-      return { available: false, ip: null, hostname: null, dnsName: null };
-    }
-    return gatewayFetch<{
-      available: boolean;
-      ip: string | null;
-      hostname: string | null;
-      dnsName: string | null;
-    }>("/api/tailscale");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.TAILSCALE_WHOIS, async (_event, ip: string) => {
-    return gatewayFetch(`/api/tailscale/whois?ip=${encodeURIComponent(ip)}`);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.TAILSCALE_DEVICES, async () => {
-    if (!isGatewayRunning) {
-      return { available: false, self: null, devices: [] };
-    }
-    return gatewayFetch<TailnetDevicesResponse>("/api/tailscale/devices");
-  });
-
-  // Share + peers
-  ipcMain.handle(IPC_CHANNELS.SHARE_GET, async () => {
-    return gatewayFetch<ShareInfo>("/api/share");
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.PEERS_ADD,
-    async (_event, address: string, probe?: boolean) => {
-      // Registering a peer needs the local gateway (it proxies the peer's tools),
-      // so start it on demand instead of relying on auto-start.
-      await ensureGatewayRunning();
-      return gatewayFetch<AddPeerResult>("/api/peers", {
-        method: "POST",
-        body: JSON.stringify({ address, probe: probe === true }),
-      });
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.PEERS_REMOVE, async (_event, id: string) => {
-    await ensureGatewayRunning();
-    return gatewayFetch<{ success: boolean }>(`/api/peers/${id}`, {
-      method: "DELETE",
-    });
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.SESSIONS_DISCONNECT,
-    async (_event, deviceId: string) => {
-      return gatewayFetch<{ success: boolean; closed: number }>(
-        `/api/sessions/${encodeURIComponent(deviceId)}`,
-        { method: "DELETE" },
-      );
-    },
-  );
-
-  // External links
-  ipcMain.on("shell:openExternal", (_event, url: string) => {
+  ipcMain.on(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, (_event, url: string) => {
     void shell.openExternal(url);
   });
 }
@@ -891,7 +597,7 @@ app.on("before-quit", () => {
 // Handle protocol links (for OAuth callbacks, etc.)
 app.on("open-url", (event, url) => {
   event.preventDefault();
-  mainWindow?.webContents.send("protocol:url", url);
+  mainWindow?.webContents.send(IPC_CHANNELS.PROTOCOL_URL, url);
 });
 
 // Export for testing

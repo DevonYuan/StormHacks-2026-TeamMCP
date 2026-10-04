@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { PolicyEngine, createDefaultPolicy, validatePolicy } from '../../src/backend/gateway/authz/policy.js'
-import { PolicyDocument, PolicyRule, Identity, addPolicyRule, removePolicyRule } from '../../src/backend/shared/policy.js'
+import { PolicyEngine, validatePolicy } from '../../src/backend/gateway/authz/policy.js'
+import {
+  createDefaultPolicy,
+  PolicyDocument,
+  PolicyRule,
+  Identity,
+  addPolicyRule,
+  removePolicyRule,
+} from '../../src/backend/shared/policy.js'
 
 const testIdentity: Identity = {
   user: 'alice@example.com',
@@ -263,7 +270,6 @@ describe('validatePolicy', () => {
     expect(result.errors.some(e => e.includes('duplicate id'))).toBe(true)
   })
 })
-
 describe('policy rule mutations', () => {
   const basePolicy = (): PolicyDocument => ({
     version: 1,
@@ -304,3 +310,4 @@ describe('policy rule mutations', () => {
     expect(after.rules.map((r) => r.id)).toEqual(['rule-a'])
   })
 })
+
