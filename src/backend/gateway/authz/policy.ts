@@ -40,12 +40,9 @@ export class PolicyEngine {
     toolName?: string,
     _method?: string
   ): PolicyDecision {
-    const matchedRules: PolicyRule[] = []
-
     // Check each rule in priority order
     for (const rule of this.policy.rules) {
       if (this.ruleMatches(rule, identity, serverId, toolName)) {
-        matchedRules.push(rule)
         // First match wins (rules already sorted by priority)
         return {
           allowed: rule.effect === 'allow',
@@ -168,28 +165,6 @@ export class PolicyEngine {
 export interface TokenPermissions {
   servers: string[]
   tools: string[]
-}
-
-/**
- * Create a default policy for initial setup.
- */
-export function createDefaultPolicy(updatedBy: string): PolicyDocument {
-  return {
-    version: 1,
-    defaultEffect: 'deny',
-    rules: [
-      {
-        id: 'admin-all',
-        name: 'Admin full access',
-        identities: [], // Empty = match all (will be restricted by admin check elsewhere)
-        effect: 'allow',
-        priority: 100,
-        description: 'Admin wildcard - configure with real admin identity',
-      },
-    ],
-    updatedAt: Date.now(),
-    updatedBy,
-  }
 }
 
 /**
