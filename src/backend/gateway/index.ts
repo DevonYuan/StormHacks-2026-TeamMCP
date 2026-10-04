@@ -49,11 +49,20 @@ interface HttpContext {
   config: GatewayConfig
 }
 
+// The renderer (Vite on another port, or the Electron window) calls this
+// loopback admin API directly. The process only binds to 127.0.0.1 by default.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(payload),
+    ...CORS_HEADERS,
   })
   res.end(payload)
 }
@@ -192,6 +201,12 @@ export class Gateway {
   ): Promise<void> {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
     const path = url.pathname
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS)
+      res.end()
+      return
+    }
 
     try {
       // MCP Streamable HTTP endpoint (all sessions handled by the proxy)
