@@ -516,11 +516,14 @@ interface LocalTailnetInfo {
 }
 
 // The Tailscale GUI apps don't put their CLI on PATH, so probe the usual spots.
+// Prefer the standalone CLI / wrapper over the macOS GUI bundle binary: under a
+// GUI-launched app's minimal environment the bundle binary can print
+// "The Tailscale GUI failed to start…" on stdout and still exit 0.
 const TAILSCALE_CLI_CANDIDATES = [
   "tailscale",
-  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
   "/usr/local/bin/tailscale",
   "/opt/homebrew/bin/tailscale",
+  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
   "C:\\Program Files\\Tailscale\\tailscale.exe",
   "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
 ];
@@ -568,7 +571,10 @@ function getLocalTailnet(): Promise<LocalTailnetInfo> {
               dnsName: parsed?.Self?.DNSName ?? null,
             });
           } catch {
-            resolve(down(null));
+            // Ran but returned non-JSON (e.g. the macOS GUI binary printing a
+            // startup error on stdout). Treat it like a failure and try the next
+            // location rather than giving up with "unavailable".
+            resolve(attempt(index + 1));
           }
         },
       );

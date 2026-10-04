@@ -55,12 +55,15 @@ interface TailscaleWhois {
 
 let tailscaleCliPath: string | null = null
 
-// The Tailscale macOS/Windows GUI apps do not add their CLI to PATH, so probe the
-// usual install locations before falling back to a bare `tailscale` lookup.
+// The Tailscale GUI apps do not add their CLI to PATH, so probe the usual install
+// locations. Try the standalone CLI / wrapper first — the macOS GUI bundle binary
+// can print "The Tailscale GUI failed to start…" on stdout and still exit 0 when
+// spawned from a GUI-less environment.
 const TAILSCALE_CLI_CANDIDATES = [
-  '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+  'tailscale',
   '/usr/local/bin/tailscale',
   '/opt/homebrew/bin/tailscale',
+  '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
   'C:\\Program Files\\Tailscale\\tailscale.exe',
   'C:\\Program Files (x86)\\Tailscale\\tailscale.exe',
 ]
@@ -69,17 +72,15 @@ export function setTailscaleCli(path: string): void {
   tailscaleCliPath = path
 }
 
-function getTailscaleCli(config: GatewayConfig): string {
-  if (tailscaleCliPath) return tailscaleCliPath
-  if (config.tailscaleCli) return config.tailscaleCli
-  for (const candidate of TAILSCALE_CLI_CANDIDATES) {
-    if (existsSync(candidate)) return candidate
-  }
-  return 'tailscale'
+function cliCandidates(config: GatewayConfig): string[] {
+  return [
+    ...(tailscaleCliPath ? [tailscaleCliPath] : []),
+    ...(config.tailscaleCli ? [config.tailscaleCli] : []),
+    ...TAILSCALE_CLI_CANDIDATES,
+  ]
 }
 
-function runTailscale(args: string[], config: GatewayConfig): Promise<string> {
-  const cli = getTailscaleCli(config)
+function runTailscaleCli(cli: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cli, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
@@ -94,14 +95,50 @@ function runTailscale(args: string[], config: GatewayConfig): Promise<string> {
   })
 }
 
+/**
+ * Run a `tailscale … --json` command, trying each CLI location until one returns
+ * parseable JSON. A candidate that exits 0 without JSON output (e.g. the macOS
+ * GUI bundle binary) is skipped rather than treated as success.
+ */
+/** Reject output that isn't JSON, so a `--json` command falls through to the next CLI. */
+function ensureJson(output: string): void {
+  JSON.parse(output)
+}
+
+/**
+ * Run `tailscale …`, trying each CLI location until one succeeds. `validate`
+ * rejects a candidate whose output is unusable (e.g. a `--json` command that
+ * exited 0 with a startup message on stdout) so the next location is tried.
+ */
+async function runTailscale(
+  args: string[],
+  config: GatewayConfig,
+  validate: (output: string) => void = () => {},
+): Promise<string> {
+  let lastError: unknown = new Error('No usable Tailscale CLI found')
+  for (const cli of cliCandidates(config)) {
+    // Skip absolute paths that don't exist; bare names resolve via PATH.
+    if ((cli.includes('/') || cli.includes('\\')) && !existsSync(cli)) continue
+    try {
+      const output = await runTailscaleCli(cli, args)
+      validate(output)
+      tailscaleCliPath = cli
+      return output
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
 export async function getTailscaleStatus(config: GatewayConfig): Promise<TailscaleStatus> {
-  const output = await runTailscale(['status', '--json'], config)
+  const output = await runTailscale(['status', '--json'], config, ensureJson)
   return JSON.parse(output)
 }
 
 export async function getTailscaleWhois(ip: string, config: GatewayConfig): Promise<TailscaleWhois> {
   // `whois` is human-readable by default; `--json` is required to parse it.
-  const output = await runTailscale(['whois', '--json', ip], config)
+  const output = await runTailscale(['whois', '--json', ip], config, ensureJson)
   return JSON.parse(output)
 }
 
