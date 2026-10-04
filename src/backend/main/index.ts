@@ -272,7 +272,7 @@ function startGatewayProcess(): Promise<void> {
     const checkReady = setInterval(async () => {
       try {
         const response = await fetch(
-          `http://${gatewayConfig.bindAddr}:${gatewayConfig.port}/health`,
+          `http://127.0.0.1:${gatewayConfig.port}/health`,
         );
         if (response.ok && !settled) {
           settled = true;
@@ -392,9 +392,11 @@ function getGatewayStatus(): GatewayStatus {
   };
 }
 
-// HTTP helpers for talking to the gateway control API
+// HTTP helpers for talking to the gateway control API.
+// The gateway always serves this on loopback too - even when the data plane is
+// bound to the tailnet interface - so control fetches never depend on the bind.
 function gatewayBaseUrl(): string {
-  return `http://${gatewayConfig.bindAddr}:${gatewayConfig.port}`;
+  return `http://127.0.0.1:${gatewayConfig.port}`;
 }
 
 async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {

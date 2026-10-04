@@ -67,9 +67,15 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return JSON.parse(body) as Record<string, unknown>
 }
 
+/** True for addresses where a separate loopback listener is redundant/conflicting. */
+function coversLoopback(addr: string): boolean {
+  return addr === '127.0.0.1' || addr === '::1' || addr === 'localhost' || addr === '0.0.0.0' || addr === '::'
+}
+
 export class Gateway {
   private services: GatewayServices | null = null
   private httpServer: ReturnType<typeof createServer> | null = null
+  private loopbackServer: ReturnType<typeof createServer> | null = null
   private shuttingDown = false
 
   constructor(private readonly configOverrides: Partial<GatewayConfig> = {}) {}
@@ -167,8 +173,8 @@ export class Gateway {
 
     await proxyServer.start()
 
-    // Create HTTP server
-    this.httpServer = createServer((req, res) => {
+    // Create the HTTP handler once; the data plane may bind one or two interfaces.
+    const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
       void this.handleHttpRequest(req, res, {
         proxyServer,
         authManager,
@@ -177,13 +183,21 @@ export class Gateway {
         clientManager,
         config,
       })
-    })
+    }
 
-    // Start listening
-    await new Promise<void>((resolve, reject) => {
-      this.httpServer!.once('error', reject)
-      this.httpServer!.listen(config.port, config.bindAddr, () => resolve())
-    })
+    // Data plane: bind the configured interface (the tailnet IP when exposed).
+    this.httpServer = createServer(handleRequest)
+    await this.listenOn(this.httpServer, config.port, config.bindAddr)
+
+    // Control plane: when exposed to the tailnet the server no longer listens on
+    // loopback, which breaks the Electron main process's local control fetches
+    // (they would get ECONNREFUSED / "fetch failed"). Also serve 127.0.0.1 so the
+    // admin API stays reachable locally. Binding a specific interface and
+    // loopback on the same port is allowed.
+    if (!coversLoopback(config.bindAddr)) {
+      this.loopbackServer = createServer(handleRequest)
+      await this.listenOn(this.loopbackServer, config.port, '127.0.0.1')
+    }
 
     this.services = {
       config,
@@ -669,14 +683,25 @@ export class Gateway {
       this.services.db.close()
     }
 
-    if (this.httpServer) {
-      await new Promise<void>((resolve) => {
-        this.httpServer!.close(() => resolve())
-      })
+    for (const server of [this.httpServer, this.loopbackServer]) {
+      if (!server) continue
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     }
 
     logger.info('Gateway stopped')
     process.exit(0)
+  }
+
+  /** Bind a server to an interface, rejecting if it cannot listen. */
+  private listenOn(
+    server: ReturnType<typeof createServer>,
+    port: number,
+    host: string,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(port, host, () => resolve())
+    })
   }
 
   getServices(): GatewayServices | null {
