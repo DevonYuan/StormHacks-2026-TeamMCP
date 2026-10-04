@@ -23,6 +23,7 @@ import type {
   TailnetDevicesResponse,
   TailscaleInfo,
 } from '@shared/types'
+import { useAuth } from '../auth/AuthContext'
 import {
   countCallsPerMinute,
   toActivityEvents,
@@ -141,6 +142,7 @@ async function loadSnapshot(): Promise<Snapshot> {
 }
 
 export function NetworkDataProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const { mode } = useAuth()
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT)
   const [error, setError] = useState<string | null>(null)
 
@@ -163,6 +165,16 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
   const data = useMemo<NetworkData>(() => {
     const now = Date.now()
     const allServerIds = snapshot.servers.map((c) => c.id)
+    const clientTailscaleUser = snapshot.tailnetDevices.self?.user?.toLowerCase()
+    const tailnetDevices = mode === 'client' && clientTailscaleUser
+      ? {
+          available: snapshot.tailnetDevices.available,
+          self: snapshot.tailnetDevices.self,
+          devices: snapshot.tailnetDevices.devices.filter(
+            (device) => device.user?.toLowerCase() === clientTailscaleUser
+          ),
+        }
+      : snapshot.tailnetDevices
     return {
       available: Boolean(window.electronAPI),
       error,
@@ -170,7 +182,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
       servers: toServers(snapshot.servers, snapshot.health, snapshot.activity, now),
       devices: toDevices(snapshot.activity, snapshot.policy, allServerIds, now),
       machines: toMachines(
-        snapshot.tailnetDevices,
+        tailnetDevices,
         snapshot.status,
         snapshot.activity,
         snapshot.policy,
@@ -240,7 +252,7 @@ export function NetworkDataProvider({ children }: { children: ReactNode }): Reac
         return closed
       },
     }
-  }, [snapshot, error, reload])
+  }, [snapshot, error, reload, mode])
 
   return <NetworkDataContext.Provider value={data}>{children}</NetworkDataContext.Provider>
 }

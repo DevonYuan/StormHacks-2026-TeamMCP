@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
   reason TEXT
 );
 
+-- Per-gateway Tailscale identity approvals; no client account credentials are stored.
+CREATE TABLE IF NOT EXISTS gateway_approvals (
+  id TEXT PRIMARY KEY,
+  tailscale_user TEXT NOT NULL COLLATE NOCASE,
+  tailscale_tailnet TEXT NOT NULL COLLATE NOCASE,
+  device TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'revoked')),
+  created_at INTEGER NOT NULL,
+  approved_at INTEGER,
+  UNIQUE (tailscale_user, tailscale_tailnet)
+);
+CREATE INDEX IF NOT EXISTS idx_gateway_approvals_status ON gateway_approvals(status);
+
 -- Gateway signing key (stored encrypted via Electron safeStorage in practice, but schema here for reference)
 -- In reality, the Ed25519 private key is stored in OS keychain via Electron safeStorage
 -- This table tracks key metadata

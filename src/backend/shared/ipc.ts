@@ -37,6 +37,10 @@ export const IPC_CHANNELS = {
   PEERS_REMOVE: 'peers:remove',
   SESSIONS_DISCONNECT: 'sessions:disconnect',
 
+  APPROVALS_LIST: 'approvals:list',
+  APPROVALS_APPROVE: 'approvals:approve',
+  APPROVALS_REVOKE: 'approvals:revoke',
+
   EVENT_ACTIVITY: 'event:activity',
   EVENT_SERVER_HEALTH: 'event:serverHealth',
   EVENT_GATEWAY_STATUS: 'event:gatewayStatus',

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Modal } from './Modal'
 import { useNetworkData } from '../data/NetworkData'
+import { useAuth } from '../auth/AuthContext'
 
 /** "Connect to a teammate": register their exposed gateway as a peer. */
 export function ConnectModal({
@@ -11,6 +12,7 @@ export function ConnectModal({
   onClose: () => void
 }): React.JSX.Element {
   const { available, servers, addPeer, probePeer, removePeer } = useNetworkData()
+  const { mode } = useAuth()
   const [address, setAddress] = useState('')
   const [busy, setBusy] = useState<null | 'test' | 'connect'>(null)
   const [error, setError] = useState<string | null>(null)
@@ -18,20 +20,25 @@ export function ConnectModal({
 
   const peers = useMemo(() => servers.filter((s) => s.transport === 'streamable-http'), [servers])
 
-  const run = async (mode: 'test' | 'connect'): Promise<void> => {
-    setBusy(mode)
+  const run = async (action: 'test' | 'connect'): Promise<void> => {
+    setBusy(action)
     setError(null)
     setOk(null)
     try {
-      const result = mode === 'test' ? await probePeer(address) : await addPeer(address)
+      const result = action === 'test'
+        ? await probePeer(address)
+        : await addPeer(address)
       setOk(
-        mode === 'test'
+        action === 'test'
           ? `Reachable — ${result.tools.length} tool(s) available`
           : `Connected — ${result.tools.length} tool(s) from ${result.url}`
       )
-      if (mode === 'connect') setAddress('')
+      if (action === 'connect') setAddress('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const message = e instanceof Error ? e.message : String(e)
+      setError(/waiting for host approval/i.test(message)
+        ? 'Access request sent. Ask the gateway host to approve your Tailscale user in Settings, then retry.'
+        : message)
     } finally {
       setBusy(null)
     }
@@ -42,7 +49,9 @@ export function ConnectModal({
       open={open}
       onClose={onClose}
       title="Connect to a teammate"
-      subtitle="Add a teammate's exposed gateway so their MCP tools appear in yours."
+      subtitle={mode === 'client'
+        ? 'Connect to any host on your tailnet. Each host controls access separately and may require approval.'
+        : "Add a teammate's exposed gateway so their MCP tools appear in yours."}
     >
       {!available ? (
         <p className="text-sm text-ink-muted">Open the desktop app to connect to a peer.</p>

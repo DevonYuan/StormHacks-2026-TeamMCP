@@ -1,14 +1,14 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { MockAuthStore } from './mockAuth'
-import type { AccountMode, AuthEvent, AuthUser } from './mockAuth'
+import { LocalProfileStore } from './localProfile'
+import type { AccountMode, AuthEvent, AuthUser } from './localProfile'
 
 interface AuthContextValue {
   user: AuthUser | null
   mode: AccountMode
   events: AuthEvent[]
-  signIn(email: string, password: string, mode: AccountMode): void
-  signUp(name: string, email: string, password: string, mode: AccountMode): void
+  signIn(email: string, password: string, mode: AccountMode): Promise<void>
+  signUp(name: string, email: string, password: string, mode: AccountMode): Promise<void>
   continueAsGuest(mode: AccountMode): void
   signOut(): void
   setMode(mode: AccountMode): void
@@ -16,24 +16,34 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-/** Provide the temporary local authentication session and audit history. */
+/** Provide a local app profile; gateway access is controlled independently by Tailscale approval. */
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
-  const [store] = useState(() => new MockAuthStore())
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [mode, setModeState] = useState<AccountMode>('server')
+  const [store] = useState(() => new LocalProfileStore(import.meta.env.DEV))
+  const [session] = useState(() => store.restoreSession())
+  const [user, setUser] = useState<AuthUser | null>(session?.user ?? null)
+  const [mode, setModeState] = useState<AccountMode>(session?.mode ?? 'server')
   const [, setRevision] = useState(0)
 
   const refreshEvents = useCallback(() => setRevision(revision => revision + 1), [])
 
-  const signIn = useCallback((email: string, password: string, nextMode: AccountMode) => {
-    const signedInUser = store.signIn(email, password, nextMode)
+  const signIn = useCallback(async (
+    email: string,
+    password: string,
+    nextMode: AccountMode,
+  ): Promise<void> => {
+    const signedInUser = await store.signIn(email, password, nextMode)
     setUser(signedInUser)
     setModeState(nextMode)
     refreshEvents()
   }, [store, refreshEvents])
 
-  const signUp = useCallback((name: string, email: string, password: string, nextMode: AccountMode) => {
-    const newUser = store.signUp(name, email, password, nextMode)
+  const signUp = useCallback(async (
+    name: string,
+    email: string,
+    password: string,
+    nextMode: AccountMode,
+  ): Promise<void> => {
+    const newUser = await store.signUp(name, email, password, nextMode)
     setUser(newUser)
     setModeState(nextMode)
     refreshEvents()

@@ -14,6 +14,8 @@ import type {
   ActivityQuery,
   ActivityStats,
   ServerHealth,
+  GatewayApproval,
+  ApprovalStatus,
 } from "../../shared/index.js";
 
 // Row types from database
@@ -80,6 +82,98 @@ interface ServerHealthRow {
   latency_ms: number | null;
   error: string | null;
   consecutive_failures: number;
+}
+
+interface GatewayApprovalRow {
+  id: string;
+  tailscale_user: string;
+  tailscale_tailnet: string;
+  device: string;
+  status: ApprovalStatus;
+  created_at: number;
+  approved_at: number | null;
+}
+
+export class GatewayApprovalRepository {
+  constructor(private db: SqliteDatabase) {}
+
+  private rowToApproval(row: GatewayApprovalRow): GatewayApproval {
+    return {
+      id: row.id,
+      tailscaleUser: row.tailscale_user,
+      tailnet: row.tailscale_tailnet,
+      device: row.device,
+      status: row.status,
+      createdAt: row.created_at,
+      approvedAt: row.approved_at ?? undefined,
+    }
+  }
+
+  request(identity: { user: string; tailnet: string; device: string }): GatewayApproval {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO gateway_approvals (
+        id, tailscale_user, tailscale_tailnet, device, status, created_at
+      ) VALUES (?, ?, ?, ?, 'pending', ?)
+    `).run(uuidv4(), identity.user, identity.tailnet, identity.device, Date.now())
+    const approval = this.getByIdentity(identity)
+    if (!approval) throw new Error('Failed to create gateway approval request.')
+    return approval
+  }
+
+  getByIdentity(identity: { user: string; tailnet: string }): GatewayApproval | undefined {
+    const rows = this.db.prepare(`
+      SELECT * FROM gateway_approvals
+      WHERE tailscale_user = ? COLLATE NOCASE AND tailscale_tailnet = ? COLLATE NOCASE
+    `).get(identity.user, identity.tailnet) as GatewayApprovalRow | undefined
+    return rows ? this.rowToApproval(rows) : undefined
+  }
+
+  getAll(): GatewayApproval[] {
+    const rows = this.db.prepare('SELECT * FROM gateway_approvals ORDER BY created_at')
+      .all() as GatewayApprovalRow[]
+    return rows.map(row => this.rowToApproval(row))
+  }
+
+  getById(id: string): GatewayApproval | undefined {
+    const row = this.db.prepare('SELECT * FROM gateway_approvals WHERE id = ?')
+      .get(id) as GatewayApprovalRow | undefined
+    return row ? this.rowToApproval(row) : undefined
+  }
+
+  createApprovedIfMissing(identity: { user: string; tailnet: string; device: string }): GatewayApproval {
+    const existing = this.getByIdentity(identity)
+    if (existing) return existing
+    const now = Date.now()
+    this.db.prepare(`
+      INSERT INTO gateway_approvals (
+        id, tailscale_user, tailscale_tailnet, device, status, created_at, approved_at
+      ) VALUES (?, ?, ?, ?, 'approved', ?, ?)
+    `).run(uuidv4(), identity.user, identity.tailnet, identity.device, now, now)
+    return this.getByIdentity(identity)!
+  }
+
+  approve(id: string): GatewayApproval | undefined {
+    this.db.prepare(`
+      UPDATE gateway_approvals SET status = 'approved', approved_at = ?
+      WHERE id = ?
+    `).run(Date.now(), id)
+    const row = this.db.prepare(
+      'SELECT * FROM gateway_approvals WHERE id = ?',
+    ).get(id) as GatewayApprovalRow | undefined
+    return row ? this.rowToApproval(row) : undefined
+  }
+
+  revoke(id: string): boolean {
+    return this.db.prepare(`
+      UPDATE gateway_approvals SET status = 'revoked'
+      WHERE id = ? AND status = 'approved'
+    `).run(id).changes > 0
+  }
+
+  getApprovedForIdentity(identity: { user: string; tailnet: string }): GatewayApproval | undefined {
+    const approval = this.getByIdentity(identity)
+    return approval?.status === 'approved' ? approval : undefined
+  }
 }
 
 export class ServerRepository {
@@ -620,6 +714,7 @@ export class RevokedTokenRepository {
 
 export function createRepositories(db: SqliteDatabase) {
   return {
+    approvals: new GatewayApprovalRepository(db),
     servers: new ServerRepository(db),
     policy: new PolicyRepository(db),
     activity: new ActivityRepository(db),

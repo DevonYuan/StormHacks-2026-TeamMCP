@@ -4,7 +4,7 @@
  * Responsibilities:
  * - Window management
  * - Gateway process supervision (start/stop/restart)
- * - OS keychain integration (safeStorage) for signing keys
+ * - Account IPC between the renderer and the gateway
  * - IPC bridge between renderer and gateway
  * - Auto-updater
  * - System tray (optional)
@@ -31,6 +31,7 @@ import { registerPolicyActivityIpcHandlers } from "./ipc/policy-activity.js";
 import { registerGatewayLifecycleIpcHandlers } from "./ipc/gateway-lifecycle.js";
 import { registerSystemIpcHandlers } from "./ipc/system.js";
 import { registerNetworkIpcHandlers } from "./ipc/network.js";
+import { registerApprovalIpcHandlers } from "./ipc/approvals.js";
 import type { HostStats } from "../shared/types.js";
 import pino from "pino";
 
@@ -557,6 +558,8 @@ function setupIpcHandlers(): void {
     ensureGatewayRunning,
     isGatewayRunning: () => isGatewayRunning,
   });
+
+  registerApprovalIpcHandlers({ gatewayFetch, ensureGatewayRunning });
 
   ipcMain.on(IPC_CHANNELS.SHELL_OPEN_EXTERNAL, (_event, url: string) => {
     void shell.openExternal(url);

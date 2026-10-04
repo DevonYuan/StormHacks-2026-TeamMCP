@@ -106,19 +106,38 @@ export async function getTailscaleWhois(ip: string, config: GatewayConfig): Prom
 }
 
 export async function resolveIdentityFromIp(clientIp: string, config: GatewayConfig): Promise<Identity | null> {
+  const normalizedIp = clientIp.startsWith('::ffff:') ? clientIp.slice(7) : clientIp
   try {
     // First check if it's a tailnet IP (100.x.y.z)
-    if (!clientIp.startsWith('100.')) {
+    if (!normalizedIp.startsWith('100.')) {
       // Not a tailnet IP - could be LAN or localhost
       return null
     }
 
-    // `tailscale whois --json` does not include a UserProfile, so resolve the
-    // identity from `tailscale status --json`: find the node owning the IP, then
-    // map its UserID through the top-level User map for the login name.
+    try {
+      const whois = await getTailscaleWhois(normalizedIp, config)
+      const loginName = whois.Node?.UserProfile?.LoginName
+      if (loginName) {
+        let magicDnsSuffix: string | undefined
+        try {
+          magicDnsSuffix = (await getTailscaleStatus(config)).MagicDNSSuffix
+        } catch {
+          // Whois already verified the peer; the login domain is a fallback tailnet label.
+        }
+        return {
+          user: loginName,
+          device: (whois.Node.Name || '').replace(/\.$/, ''),
+          deviceId: String(whois.Node.ID ?? ''),
+          tailnet: magicDnsSuffix || loginName.split('@')[1] || 'unknown',
+        }
+      }
+    } catch {
+      // Fall back to the local status snapshot for CLI versions with different whois output.
+    }
+
     const status = await getTailscaleStatus(config)
     const nodes: TailscaleNodeInfo[] = [status.Self, ...Object.values(status.Peer ?? {})]
-    const node = nodes.find(n => (n.TailscaleIPs ?? []).includes(clientIp))
+    const node = nodes.find(n => (n.TailscaleIPs ?? []).includes(normalizedIp))
     if (!node) return null
 
     const user = node.UserID != null ? status.User?.[String(node.UserID)] : undefined
@@ -129,10 +148,10 @@ export async function resolveIdentityFromIp(clientIp: string, config: GatewayCon
       user: loginName,
       device: (node.DNSName || node.HostName || '').replace(/\.$/, ''),
       deviceId: String(node.ID ?? node.StableID ?? ''),
-      tailnet: loginName.split('@')[1] || status.MagicDNSSuffix || 'unknown',
+      tailnet: status.MagicDNSSuffix || loginName.split('@')[1] || 'unknown',
     }
   } catch (error) {
-    console.warn(`Failed to resolve identity for ${clientIp}:`, error)
+    console.warn('Failed to resolve Tailscale peer identity:', error)
     return null
   }
 }
@@ -147,6 +166,23 @@ export async function getLocalTailnetInfo(config: GatewayConfig): Promise<{ ip: 
       ip: ips[0],
       hostname: status.Self.HostName,
       dnsName: status.Self.DNSName,
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function getLocalTailscaleIdentity(config: GatewayConfig): Promise<Identity | null> {
+  try {
+    const status = await getTailscaleStatus(config)
+    const node = status.Self
+    const user = node.UserID != null ? status.User?.[String(node.UserID)] : undefined
+    if (!user?.LoginName) return null
+    return {
+      user: user.LoginName,
+      device: (node.DNSName || node.HostName || '').replace(/\.$/, ''),
+      deviceId: String(node.ID ?? node.StableID ?? ''),
+      tailnet: status.MagicDNSSuffix || user.LoginName.split('@')[1] || 'unknown',
     }
   } catch {
     return null

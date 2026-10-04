@@ -2,7 +2,7 @@
 
 Source of truth: [`globals.css`](./globals.css), imported from `src/frontend/renderer/src/main.tsx`.
 
-Named Tailwind classes that consume those tokens live in [`tailwind.config.ts`](../../../../tailwind.config.ts). The CSS file stores the values. The Tailwind config only names them (`bg-brand`, `text-ink-muted`, `text-h1`).
+Named Tailwind classes that consume those tokens live in [`tailwind.config.mts`](../../../../tailwind.config.mts). The CSS file stores the values. The Tailwind config only names them (`bg-brand`, `text-ink-muted`, `text-h1`).
 
 Two themes, switched by the `dark` class on `<html>`:
 
@@ -16,7 +16,7 @@ Components reference semantic tokens only. Changing the theme restyles them with
 Never hardcode a hex, `rgb()`, or an inline colour. If a class you need does not exist:
 
 1. Add a raw palette value and a semantic token in `globals.css`.
-2. Map it to a named class in `tailwind.config.ts`.
+2. Map it to a named class in `tailwind.config.mts`.
 3. Use that class in the component.
 
 ## How a colour is stored
@@ -198,7 +198,7 @@ Reuse an existing raw colour at a new percentage before adding a new raw colour.
 Override `--color-example` inside `.dark` (blending over `--mcp-night`) if the dark theme needs a different value.
 
 ```ts
-/* tailwind.config.ts */
+/* tailwind.config.mts */
 example: "var(--color-example)",
 ```
 

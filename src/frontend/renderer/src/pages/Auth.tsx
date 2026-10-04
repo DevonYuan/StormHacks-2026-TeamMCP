@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
-import type { AccountMode } from '../auth/mockAuth'
+import type { AccountMode } from '../auth/localProfile'
 
 type AuthForm = 'sign-in' | 'sign-up'
 
@@ -9,7 +9,7 @@ const inputClass =
 const buttonClass =
   'w-full rounded-lg bg-brand px-4 py-2.5 text-button font-medium text-primary-foreground hover:opacity-90'
 
-/** Render the demo signup/login form and collect the preferred operating mode. */
+/** Render the local profile signup/login form and collect the preferred operating mode. */
 export default function AuthPage(): React.JSX.Element {
   const { signIn, signUp, continueAsGuest } = useAuth()
   const [form, setForm] = useState<AuthForm>('sign-in')
@@ -19,20 +19,24 @@ export default function AuthPage(): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  /** Validate the form and begin the mock session. */
-  function submit(event: React.FormEvent<HTMLFormElement>): void {
+  /** Validate the local profile and enter the app. */
+  async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     setError(null)
+    setBusy(true)
     try {
       if (form === 'sign-up') {
         if (password !== confirmPassword) throw new Error('Passwords do not match.')
-        signUp(name, email, password, mode)
+        await signUp(name, email, password, mode)
       } else {
-        signIn(email, password, mode)
+        await signIn(email, password, mode)
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -49,9 +53,9 @@ export default function AuthPage(): React.JSX.Element {
             </p>
           </div>
           <div className="mt-10 rounded-xl border border-border bg-surface-raised p-4">
-            <div className="text-label text-ink-muted uppercase">Demo authentication</div>
+            <div className="text-label text-ink-muted uppercase">Local profile</div>
             <p className="mt-2 text-body-small text-ink">
-              This temporary sign-in is only for the app interface. The gateway still uses Tailscale identity and its server-side policy.
+              Sign in is only for this app. Gateway hosts separately approve your verified Tailscale identity.
             </p>
           </div>
         </section>
@@ -74,9 +78,9 @@ export default function AuthPage(): React.JSX.Element {
             ))}
           </div>
 
-          <h2 className="text-h2 text-ink-heading">{form === 'sign-in' ? 'Welcome back' : 'Create your account'}</h2>
+          <h2 className="text-h2 text-ink-heading">{form === 'sign-in' ? 'Welcome back' : 'Create your profile'}</h2>
           <p className="mt-1 text-body-small text-ink">
-            {form === 'sign-in' ? 'Log in to continue to your workspace.' : 'Your demo account lasts until the app reloads.'}
+            {form === 'sign-in' ? 'Log in to your local app profile.' : 'Create a local app profile.'}
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
@@ -153,8 +157,8 @@ export default function AuthPage(): React.JSX.Element {
             </fieldset>
 
             {error && <p role="alert" className="rounded-lg border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-body-small text-status-blocked">{error}</p>}
-            <button type="submit" className={buttonClass}>
-              {form === 'sign-in' ? 'Log in' : 'Create account'}
+            <button type="submit" disabled={busy} className={`${buttonClass} disabled:opacity-60`}>
+              {busy ? 'Please wait…' : form === 'sign-in' ? 'Log in' : 'Create profile'}
             </button>
           </form>
 
@@ -168,13 +172,13 @@ export default function AuthPage(): React.JSX.Element {
             </button>
           )}
 
-          {form === 'sign-in' && (
+          {import.meta.env.DEV && !window.electronAPI && form === 'sign-in' && (
             <p className="mt-5 rounded-lg bg-surface-muted px-3 py-2 text-caption text-ink">
               Demo account: <span className="font-medium text-ink-emphasis">demo@tether.local</span> / <span className="font-medium text-ink-emphasis">demo1234</span>
             </p>
           )}
           <p className="mt-4 text-caption leading-relaxed text-ink-muted">
-            Demo only: accounts, passwords, and login history are held in memory and are not sent to a database. This does not secure or identify requests to the gateway.
+            This profile exists only in this app session and does not grant gateway access. Hosts verify your Tailscale identity and approve access separately.
           </p>
         </section>
       </div>

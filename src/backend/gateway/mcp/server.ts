@@ -27,6 +27,7 @@ import type { Identity, TokenClaims } from '../../shared/policy.js'
 import { MCPClientManager } from './client.js'
 import { PolicyEngine } from '../authz/policy.js'
 import { AuthManager, AuthContext } from '../auth/auth.js'
+import type { GatewayApprovalService } from '../auth/approvals.js'
 import { ActivityRepository, ServerHealthRepository } from '../db/repository.js'
 import { GatewayConfig } from '../../shared/config.js'
 import pino from 'pino'
@@ -38,6 +39,7 @@ export interface ProxyServerOptions {
   clientManager: MCPClientManager
   policyEngine: PolicyEngine
   authManager: AuthManager
+  approvalService: GatewayApprovalService
   activityRepo: ActivityRepository
   healthRepo: ServerHealthRepository
 }
@@ -340,6 +342,24 @@ export class MCPProxyServer {
     this.activeSessions.delete(sessionId)
   }
 
+  async revokeApprovalSessions(approvalId: string): Promise<void> {
+    const sessionIds = [...this.activeSessions]
+      .filter(([, context]) => context.approvalId === approvalId)
+      .map(([sessionId]) => sessionId)
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId)
+      this.activeSessions.delete(sessionId)
+      this.sessions.delete(sessionId)
+      if (!session) continue
+      try {
+        await session.transport.close()
+        await session.server.close()
+      } catch (error) {
+        logger.warn({ error, sessionId, approvalId }, 'Failed to close revoked access session')
+      }
+    }
+  }
+
   /**
    * Live MCP sessions per Tailscale device id. Clients rarely send DELETE on
    * exit, so a session only counts while it holds an open stream or made a
@@ -426,13 +446,45 @@ export class MCPProxyServer {
       return
     }
 
+    const identity = await this.options.authManager.resolveClientIdentity(this.clientIp(req))
+    const localDevelopment = process.env.NODE_ENV !== 'production' &&
+      (this.clientIp(req) === '127.0.0.1' || this.clientIp(req) === '::1')
+    const existingApproval = identity
+      ? this.options.approvalService.authorize(identity)
+      : undefined
+    const approval = identity && !existingApproval && !localDevelopment
+      ? this.options.approvalService.request(identity)
+      : existingApproval
+
+    if (!identity || (approval?.status !== 'approved' && !localDevelopment)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: approval?.status === 'revoked'
+            ? 'Gateway access has been revoked by the host.'
+            : approval
+              ? 'Your Tailscale identity is waiting for host approval.'
+              : 'A verified Tailscale identity is required.',
+        },
+        id: null,
+      }))
+      return
+    }
+
     const server = this.createServer()
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {
         this.sessions.set(sid, { server, transport })
+        this.activeSessions.set(sid, {
+          identity: identity!,
+          approvalId: approval?.id,
+          token: '',
+          claims: this.buildClaims(identity!),
+        })
         this.touch(sid)
-        void this.registerSessionForRequest(sid, req)
         logger.debug({ sessionId: sid }, 'Session initialized')
       },
       onsessionclosed: (sid) => this.forget(sid),
@@ -455,43 +507,9 @@ export class MCPProxyServer {
       this.handleRequest(req, res, parsedBody)
   }
 
-  /**
-   * Authenticate the peer for a new session and store its context.
-   */
-  private async registerSessionForRequest(sessionId: string, req: IncomingMessage): Promise<void> {
+  private clientIp(req: IncomingMessage): string {
     const rawIp = req.socket?.remoteAddress || '127.0.0.1'
-    const clientIp =
-      rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp === '::1' ? '127.0.0.1' : rawIp
-
-    const result = await this.options.authManager.authenticateConnection(clientIp)
-    if (result.success && result.identity && result.token) {
-      try {
-        const { claims } = this.options.authManager.verifyToken(result.token)
-        this.activeSessions.set(sessionId, { identity: result.identity, token: result.token, claims })
-        return
-      } catch (error) {
-        logger.warn({ error }, 'Failed to verify session token; using resolved identity')
-      }
-      this.activeSessions.set(sessionId, {
-        identity: result.identity,
-        token: result.token,
-        claims: this.buildClaims(result.identity),
-      })
-      return
-    }
-
-    // Fail closed with an explicit local identity so loopback development works.
-    const identity: Identity = {
-      user: 'local@dev',
-      device: 'localhost',
-      deviceId: 'local-dev-device',
-      tailnet: 'local',
-    }
-    this.activeSessions.set(sessionId, {
-      identity,
-      token: '',
-      claims: this.buildClaims(identity),
-    })
+    return rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp === '::1' ? '127.0.0.1' : rawIp
   }
 
   private buildClaims(identity: Identity): TokenClaims {

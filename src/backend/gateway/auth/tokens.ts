@@ -1,6 +1,6 @@
 /**
  * Ed25519-signed session tokens for gateway authentication.
- * Private key stored via Electron safeStorage (OS keychain).
+ * A caller-supplied private key can be persisted externally; otherwise keys are process-local.
  * Tokens are stateless JWT-like structures with Ed25519 signatures.
  */
 
@@ -36,13 +36,12 @@ function jsonDecode<T>(str: string): T {
   return JSON.parse(base64urlDecode(str).toString())
 }
 
-// Key management - in production, private key is stored in OS keychain via Electron safeStorage
-// For the gateway process, we accept the private key as a parameter (loaded by Electron main)
+// A caller may supply a previously persisted key; absent that, a fresh process-local pair is generated.
 let signingKeyPair: { privateKey: KeyObject; publicKey: KeyObject; kid: string } | null = null
 
 export function initializeSigningKey(privateKeyB64?: string, keyId = 'gateway-key-1'): { privateKey: KeyObject; publicKey: KeyObject; kid: string } {
   if (privateKeyB64) {
-    // Load existing key from safeStorage
+    // Load a previously persisted key supplied by the caller.
     const privateKey = createPrivateKey({
       key: Buffer.from(privateKeyB64, 'base64'),
       format: 'der',
