@@ -107,7 +107,8 @@ const api = {
     delete: (id: string) => invoke<[string], { success: boolean }>('servers:delete', id),
     connect: (id: string) => invoke<[string], { success: boolean }>('servers:connect', id),
     disconnect: (id: string) => invoke<[string], { success: boolean }>('servers:disconnect', id),
-    refresh: (id: string) => invoke<[string], { success: boolean }>('servers:refresh', id),
+    refresh: (id: string) =>
+      invoke<[string], { success: boolean; tools: { name: string }[] }>('servers:refresh', id),
     onToolsChanged: (listener: (serverId: string) => void) =>
       on('event:toolsChanged', listener),
   },

@@ -135,7 +135,7 @@ export function ExposeModal({
             <p className="text-xs text-ink-muted">
               {share?.tailscale.available
                 ? 'The gateway is bound to loopback, so it is only reachable on this machine. Expose it to rebind to your tailnet interface.'
-                : "Tailscale isn't available, so this is reachable only on this machine. Start Tailscale to share it with your team."}
+                : 'Tailscale isn’t available, so this is reachable only on this machine. Start Tailscale, then expose again.'}
             </p>
           )}
 

@@ -12,6 +12,7 @@
 
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFile, spawn, ChildProcess } from "node:child_process";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import {
@@ -104,9 +105,30 @@ const IPC_CHANNELS = {
 } as const;
 
 // Initialize configuration
+// Settings the renderer may change. Never bindAddr: exposing goes through gateway:expose.
+const USER_SETTINGS = ["port", "redactToolPayloads", "logLevel"] as const;
+
+function pickUserSettings(source: Partial<GatewayConfig>): Partial<GatewayConfig> {
+  return Object.fromEntries(
+    USER_SETTINGS.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]),
+  ) as Partial<GatewayConfig>;
+}
+
+function settingsPath(): string {
+  return join(app.getPath("userData"), "settings.json");
+}
+
+function loadUserSettings(): Partial<GatewayConfig> {
+  try {
+    return pickUserSettings(JSON.parse(readFileSync(settingsPath(), "utf8")));
+  } catch {
+    return {};
+  }
+}
+
 function initializeConfig(): void {
   const envConfig = loadConfigFromEnv();
-  gatewayConfig = mergeConfig(DEFAULT_GATEWAY_CONFIG, {}, envConfig);
+  gatewayConfig = mergeConfig(DEFAULT_GATEWAY_CONFIG, loadUserSettings(), envConfig);
   appConfig = { ...DEFAULT_APP_CONFIG, gateway: gatewayConfig };
   logger.info({ gatewayConfig }, "Configuration loaded");
 }
@@ -134,7 +156,6 @@ function createWindow(): void {
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
   if (rendererUrl) {
     mainWindow.loadURL(rendererUrl);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     mainWindow.loadFile(join(__dirname, "../../frontend/renderer/index.html"));
   }
@@ -762,11 +783,18 @@ function setupIpcHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.CONFIG_UPDATE,
     async (_event, updates: Partial<GatewayConfig>) => {
-      gatewayConfig = GatewayConfigSchema.parse({
-        ...gatewayConfig,
-        ...updates,
-      });
+      const allowed = pickUserSettings(updates);
+      gatewayConfig = GatewayConfigSchema.parse({ ...gatewayConfig, ...allowed });
       appConfig = { ...appConfig, gateway: gatewayConfig };
+      writeFileSync(
+        settingsPath(),
+        JSON.stringify({ ...loadUserSettings(), ...allowed }, null, 2),
+      );
+      // The gateway reads its config at spawn, so restart it to apply.
+      if (gatewayProcess) {
+        await stopGateway();
+        await startGateway();
+      }
       return { success: true, gateway: gatewayConfig };
     },
   );
