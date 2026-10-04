@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Machine, MachineStatus } from '@shared/types'
 import { useNetworkData } from '../data/NetworkData'
 
@@ -15,6 +15,7 @@ type SortKey = 'name' | 'ip' | 'gatewayId' | 'status'
 const filters: { id: StatusFilter; label: string }[] = [
   { id: 'all', label: 'All machines' },
   { id: 'connected', label: 'Connected' },
+  { id: 'disconnected', label: 'Disconnected' },
   { id: 'offline', label: 'Offline' },
   { id: 'denied', label: 'Denied' }
 ]
@@ -29,11 +30,12 @@ const sortLabel: Record<SortKey, string> = {
 
 const statusLabel: Record<MachineStatus, string> = {
   connected: 'Connected',
+  disconnected: 'Disconnected',
   offline: 'Offline',
   denied: 'Denied'
 }
 
-const statusRank: Record<MachineStatus, number> = { connected: 0, denied: 1, offline: 2 }
+const statusRank: Record<MachineStatus, number> = { connected: 0, disconnected: 1, denied: 2, offline: 3 }
 
 function compareMachines(sortKey: SortKey, a: Machine, b: Machine): number {
   if (sortKey === 'status') return statusRank[a.status] - statusRank[b.status] || a.name.localeCompare(b.name)
@@ -138,10 +140,12 @@ function StatCard({
 function StatusCell({ status }: { status: MachineStatus }): React.JSX.Element {
   const dot =
     status === 'connected'
-      ? 'bg-status-online status-glow-online motion-safe:animate-breathe'
-      : status === 'denied'
-        ? 'bg-status-blocked'
-        : 'bg-status-offline'
+      ? 'bg-green-500 shadow-[0_0_8px] shadow-green-500/50 motion-safe:animate-breathe'
+      : status === 'disconnected'
+        ? 'bg-amber-400'
+        : status === 'denied'
+          ? 'bg-status-blocked'
+          : 'bg-red-500'
   return (
     <div className="flex items-center gap-2">
       <span className={`size-2 rounded-full ${dot}`} />
@@ -150,13 +154,85 @@ function StatusCell({ status }: { status: MachineStatus }): React.JSX.Element {
   )
 }
 
+interface RowAction {
+  label: string
+  onSelect: () => void
+  hidden?: boolean
+  danger?: boolean
+}
+
+function RowMenu({ machine, actions }: { machine: Machine; actions: RowAction[] }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent | KeyboardEvent): void => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !ref.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative inline-block text-left">
+      <button
+        type="button"
+        aria-label={`Actions for ${machine.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-lg p-2 text-ink-muted transition hover:bg-surface-muted hover:text-ink-emphasis active:scale-95"
+      >
+        <svg viewBox="0 0 20 20" className="size-4" fill="currentColor" aria-hidden>
+          <circle cx="10" cy="4.5" r="1.2" />
+          <circle cx="10" cy="10" r="1.2" />
+          <circle cx="10" cy="15.5" r="1.2" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface-raised py-1 shadow-lg"
+        >
+          {actions
+            .filter((action) => !action.hidden)
+            .map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false)
+                  action.onSelect()
+                }}
+                className={`block w-full px-3 py-2 text-left text-body-small hover:bg-surface-muted ${
+                  action.danger ? 'text-red-600' : 'text-ink-emphasis'
+                }`}
+              >
+                {action.label}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Machines(): React.JSX.Element {
-  const { machines, authFailures, status, error, refresh: refreshData } = useNetworkData()
+  const { machines, authFailures, status, error, refresh: refreshData, setBlocked, disconnect } =
+    useNetworkData()
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [page, setPage] = useState(0)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   // No data yet and no error → still waiting on the first poll.
   const loading = !status && machines.length === 0 && !error
@@ -183,16 +259,67 @@ export default function Machines(): React.JSX.Element {
   const rangeStart = visible.length === 0 ? 0 : safePage * PAGE_SIZE + 1
   const rangeEnd = Math.min(visible.length, (safePage + 1) * PAGE_SIZE)
 
+  const [refreshing, setRefreshing] = useState(false)
   const refresh = (): void => {
-    void refreshData()
+    setRefreshing(true)
+    // Hold the spinner briefly: a local refresh resolves too fast to register as feedback.
+    void Promise.all([refreshData(), new Promise((r) => setTimeout(r, 500))]).finally(() =>
+      setRefreshing(false)
+    )
   }
 
-  const copyGatewayId = (machine: Machine): void => {
-    if (machine.gatewayId === '—') return
-    void navigator.clipboard.writeText(machine.gatewayId).then(() => {
-      setCopiedId(machine.id)
-      window.setTimeout(() => setCopiedId((current) => (current === machine.id ? null : current)), 1200)
-    })
+  const run = (task: () => Promise<string>): void => {
+    void task()
+      .then((text) => setNotice({ text, error: false }))
+      .catch((err: unknown) => setNotice({ text: err instanceof Error ? err.message : String(err), error: true }))
+  }
+
+  useEffect(() => {
+    if (!notice) return
+    const id = window.setTimeout(() => setNotice(null), 3000)
+    return () => window.clearTimeout(id)
+  }, [notice])
+
+  const actionsFor = (machine: Machine): RowAction[] => {
+    const peer = !machine.self && machine.deviceId !== ''
+    const copy = (label: string, value: string) => async () => {
+      await navigator.clipboard.writeText(value)
+      return `${label} copied`
+    }
+    return [
+      {
+        label: 'Copy MCP address',
+        hidden: !machine.mcpUrl,
+        onSelect: () => run(copy('MCP address', machine.mcpUrl ?? '')),
+      },
+      {
+        label: 'Copy gateway id',
+        hidden: machine.gatewayId === '—',
+        onSelect: () => run(copy('Gateway id', machine.gatewayId)),
+      },
+      {
+        label: 'Disconnect',
+        hidden: !peer,
+        danger: true,
+        onSelect: () =>
+          run(async () => {
+            const closed = await disconnect(machine.deviceId)
+            return closed
+              ? `Disconnected ${machine.name} (${closed} session${closed === 1 ? '' : 's'})`
+              : `${machine.name} has no open sessions on this gateway`
+          }),
+      },
+      {
+        label: machine.blocked ? 'Unblock' : 'Block',
+        hidden: !peer,
+        danger: !machine.blocked,
+        onSelect: () =>
+          run(async () => {
+            await setBlocked(machine, !machine.blocked)
+            return `${machine.name} ${machine.blocked ? 'unblocked' : 'blocked'}`
+          }),
+      },
+    ]
   }
 
   return (
@@ -217,12 +344,36 @@ export default function Machines(): React.JSX.Element {
           <button
             type="button"
             onClick={refresh}
-            className="flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-button text-primary-foreground hover:opacity-90"
+            disabled={refreshing}
+            className="flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-button text-primary-foreground transition hover:opacity-90 active:scale-95 disabled:opacity-70"
           >
-            Refresh
+            <svg
+              viewBox="0 0 20 20"
+              className={`size-4 ${refreshing ? 'motion-safe:animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden
+            >
+              <path d="M16 10a6 6 0 1 1-1.76-4.24M16 4v3.5h-3.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          className={`-mt-4 mb-4 rounded-lg border px-3 py-2 text-body-small ${
+            notice.error
+              ? 'border-status-blocked/30 bg-status-blocked/5 text-status-blocked'
+              : 'border-border bg-surface-muted text-ink-emphasis'
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
 
       <div className="mb-8 grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard
@@ -391,19 +542,7 @@ export default function Machines(): React.JSX.Element {
                       <StatusCell status={machine.status} />
                     </td>
                     <td className="px-4 py-5 text-right">
-                      <button
-                        type="button"
-                        aria-label={`Copy gateway id for ${machine.name}`}
-                        title={copiedId === machine.id ? 'Copied' : 'Copy gateway id'}
-                        onClick={() => copyGatewayId(machine)}
-                        className="rounded-lg p-2 text-ink-muted hover:bg-surface-muted hover:text-ink-emphasis"
-                      >
-                        <svg viewBox="0 0 20 20" className="size-4" fill="currentColor" aria-hidden>
-                          <circle cx="10" cy="4.5" r="1.2" />
-                          <circle cx="10" cy="10" r="1.2" />
-                          <circle cx="10" cy="15.5" r="1.2" />
-                        </svg>
-                      </button>
+                      <RowMenu machine={machine} actions={actionsFor(machine)} />
                     </td>
                   </tr>
                 )

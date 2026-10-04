@@ -543,7 +543,7 @@ function setupIpcHandlers(): void {
     ensureGatewayRunning,
   });
 
-  registerPolicyActivityIpcHandlers({ gatewayFetch, gatewayFetchOr });
+  registerPolicyActivityIpcHandlers({ gatewayFetch, gatewayFetchOr, ensureGatewayRunning });
 
   registerSystemIpcHandlers({
     hostStats,

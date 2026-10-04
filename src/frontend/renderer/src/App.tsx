@@ -170,7 +170,7 @@ function Sidebar({ page, onPage }: { page: Page; onPage: (p: Page) => void }): R
           <button
             onClick={() => void (running ? stopGateway() : startGateway())}
             aria-label={running ? 'Pause gateway' : 'Start gateway'}
-            className="ml-auto rounded-md p-1 text-ink hover:bg-surface-muted hover:text-ink-emphasis"
+            className={`ml-auto rounded-md p-1 ${running ? 'text-red-600/75 hover:bg-red-600/10 hover:text-red-600' : 'text-ink hover:bg-surface-muted hover:text-ink-emphasis'}`}
           >
             <svg viewBox="0 0 16 16" className="size-3.5" fill="currentColor" aria-hidden>
               {running ? (
@@ -265,9 +265,11 @@ function App(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="grid h-screen grid-cols-shell grid-rows-shell">
+    <div className="grid h-screen grid-cols-shell grid-rows-shell overflow-hidden">
       <Sidebar page={page} onPage={setPage} />
-      <main className="overflow-y-auto">
+      {/* min-h-0 lets the 1fr row shrink so this pane scrolls instead of the
+          grid growing past the (overflow-hidden) window. */}
+      <main className="min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-content px-6 py-6">
           <TopBar />
           {page === 'Network' ? (

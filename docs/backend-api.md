@@ -306,6 +306,30 @@ Alias for `PUT /policy`.
 
 ---
 
+### `POST /api/policy/rules`
+
+Append a single rule to the policy atomically (the gateway sets `updatedAt`/`updatedBy`).
+Prefer this over `GET /api/policy` + `PUT /api/policy` when adding one rule, since it
+cannot drop a concurrent change.
+
+**Request:** a single `PolicyRule`.
+
+**Response (201):** `{ "success": true, "policy": { ... } }`
+
+**Response (400):** validation error (malformed rule).
+
+---
+
+### `DELETE /api/policy/rules/:id`
+
+Remove a single rule atomically.
+
+**Response (200):** `{ "success": true, "policy": { ... } }`
+
+**Response (404):** `{ "error": "Rule not found: <id>" }`
+
+---
+
 ### `GET /api/activity`
 
 Query the activity log with filters and pagination.
